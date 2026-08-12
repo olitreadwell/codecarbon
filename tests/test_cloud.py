@@ -117,3 +117,9 @@ def test_cloud_detection_enabled_by_default():
         tracker._get_cloud_metadata()
 
     mocked_get_env_cloud_details.assert_called_once()
+
+
+def test_get_env_cloud_details_with_no_provider():
+    """An empty mapping must not blow up on ThreadPoolExecutor(max_workers=0)."""
+    with mock.patch("codecarbon.core.cloud.CLOUD_METADATA_MAPPING", {}):
+        assert get_env_cloud_details() is None

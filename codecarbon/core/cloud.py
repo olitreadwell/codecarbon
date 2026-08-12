@@ -56,7 +56,8 @@ def get_env_cloud_details(timeout: int = 1) -> Optional[Any]:
 
     # All providers answer on the same link-local address, so probing them
     # sequentially costs one timeout each on a machine that is not on a cloud.
-    with ThreadPoolExecutor(max_workers=len(providers)) as executor:
+    # `or 1`: ThreadPoolExecutor rejects max_workers=0.
+    with ThreadPoolExecutor(max_workers=len(providers) or 1) as executor:
         futures = [executor.submit(_probe_provider, p, timeout) for p in providers]
         # Resolve in mapping order, not completion order, so detection stays
         # deterministic if more than one provider answers.
