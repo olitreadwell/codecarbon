@@ -25,6 +25,7 @@ from copy import copy, deepcopy
 from unittest import TestCase, mock
 
 import pynvml as real_pynvml
+import pytest
 
 tc = TestCase()
 
@@ -263,6 +264,38 @@ class TestGpu(FakeGPUEnv):
             expected[1]["total_energy_consumption"] = None
 
             assert alldevices.get_gpu_details() == expected
+        finally:
+            pynvml.nvmlDeviceGetTotalEnergyConsumption = original_energy
+
+    def test_gpu_without_energy_counter_falls_back_to_power(self):
+        """
+        GPUs without a total energy consumption counter must integrate their
+        instantaneous power usage instead of reporting a zero delta.
+        """
+        import pynvml
+
+        from codecarbon.core.gpu import AllGPUDevices
+        from codecarbon.core.units import Time
+
+        def raise_exception(handle):
+            raise pynvml.NVMLError("Not Supported")
+
+        original_energy = pynvml.nvmlDeviceGetTotalEnergyConsumption
+        try:
+            pynvml.nvmlDeviceGetTotalEnergyConsumption = raise_exception
+            alldevices = AllGPUDevices()
+
+            devices_info = alldevices.get_delta(Time.from_seconds(3600))
+
+            # power_usage in the fake module is in milliwatts: 26000 and 29000
+            assert devices_info[0]["power_usage"].W == pytest.approx(26)
+            assert devices_info[1]["power_usage"].W == pytest.approx(29)
+            assert devices_info[0]["delta_energy_consumption"].kWh == pytest.approx(
+                0.026
+            )
+            assert devices_info[1]["delta_energy_consumption"].kWh == pytest.approx(
+                0.029
+            )
         finally:
             pynvml.nvmlDeviceGetTotalEnergyConsumption = original_energy
 

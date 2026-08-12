@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict
 
 from codecarbon.core.units import Energy, Power, Time
+from codecarbon.external.logger import logger
 
 
 @dataclass
@@ -47,13 +48,32 @@ class GPUDevice:
     def delta(self, duration: Time) -> dict:
         """
         Compute the energy/power used since last call.
+
+        Devices without a cumulative energy counter (pre-Volta Nvidia cards,
+        many virtualised GPUs) return None here. For those we integrate the
+        instantaneous power draw over the measurement duration instead of
+        reporting a zero delta.
         """
-        new_last_energy = energy = self._get_energy_kwh()
-        self.power = self.power.from_energies_and_delay(
-            energy, self.last_energy, duration
-        )
-        self.energy_delta = energy - self.last_energy
-        self.last_energy = new_last_energy
+        total_energy_consumption = self._get_total_energy_consumption()
+        if total_energy_consumption is None:
+            if not getattr(self, "_uses_power_fallback", False):
+                self._uses_power_fallback = True
+                logger.warning(
+                    f"GPU {self.gpu_index} does not provide a total energy consumption counter, "
+                    "falling back to integrating instantaneous power usage. "
+                    "Measurements will be less accurate."
+                )
+            self.power = Power.from_watts(self._get_power_usage())
+            self.energy_delta = Energy.from_power_and_time(
+                power=self.power, time=duration
+            )
+        else:
+            energy = Energy.from_millijoules(total_energy_consumption)
+            self.power = Power.from_energies_and_delay(
+                energy, self.last_energy, duration
+            )
+            self.energy_delta = energy - self.last_energy
+            self.last_energy = energy
         return {
             "name": self._gpu_name,
             "uuid": self._uuid,
@@ -127,4 +147,4 @@ class GPUDevice:
         Backends that need to emit warnings for selected devices should override
         this method. The default implementation is intentionally a no-op.
         """
-        return None
+        return

@@ -53,7 +53,9 @@ class NvidiaGPUDevice(GPUDevice):
         try:
             return pynvml.nvmlDeviceGetTotalEnergyConsumption(self.handle)
         except pynvml.NVMLError:
-            logger.warning(
+            # Logged once per device by GPUDevice.delta when falling back to
+            # power integration, so keep this at debug level to avoid flooding.
+            logger.debug(
                 "Failed to retrieve gpu total energy consumption", exc_info=True
             )
             return None
