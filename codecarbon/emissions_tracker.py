@@ -268,7 +268,10 @@ class BaseEmissionsTracker(ABC):
 
     def _initialize_runtime_state(self) -> None:
         self._start_time: Optional[float] = None
-        self._is_stopped: bool = False
+        # Timestamp of the last stop(); None while the tracker is running.
+        # This is the single start/stop state flag: `_start_time is None` means
+        # never started, `_stopped_at is not None` means stopped.
+        self._stopped_at: Optional[float] = None
         self.final_emissions: Optional[float] = None
         self.final_emissions_data: Optional[EmissionsData] = None
         self._last_measured_time: float = time.perf_counter()
@@ -905,10 +908,10 @@ class BaseEmissionsTracker(ABC):
         if self._start_time is None:
             logger.error("You first need to start the tracker.")
             return None
-        if self._is_stopped:
+        if self._stopped_at is not None:
             logger.warning("Tracker already stopped !")
             return self.final_emissions
-        self._is_stopped = True
+        self._stopped_at = time.perf_counter()
 
         if not self._allow_multiple_runs:
             # Release the lock

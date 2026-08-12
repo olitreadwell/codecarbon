@@ -61,6 +61,7 @@ class Lock:
             try:
                 # Remove the lock file only if it was created by this instance
                 if self._has_created_lock:
+                    self._has_created_lock = False
                     os.remove(LOCKFILE)
             except OSError as e:
                 logger.debug(f"Error: {e}")

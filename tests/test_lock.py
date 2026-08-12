@@ -32,6 +32,17 @@ class TestLock(unittest.TestCase):
 
     @patch("codecarbon.lock.os.remove")
     @patch("codecarbon.lock.open", new_callable=mock_open)
+    def test_release_is_idempotent(self, mock_file, mock_remove):
+        # A second release() must not delete the lock file again: by then it may
+        # have been re-created by another instance of codecarbon.
+        self.lock.acquire()
+        self.lock.release()
+        self.lock.release()
+        mock_remove.assert_called_once_with(LOCKFILE)
+        self.assertFalse(self.lock._has_created_lock)
+
+    @patch("codecarbon.lock.os.remove")
+    @patch("codecarbon.lock.open", new_callable=mock_open)
     def test_release_does_not_release_when_not_created_by_this_instance(
         self, mock_file, mock_remove
     ):
