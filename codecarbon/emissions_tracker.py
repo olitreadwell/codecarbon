@@ -968,7 +968,12 @@ class BaseEmissionsTracker(ABC):
 
             task_emission_data = dataclasses.replace(emissions_at_stop)
             request_duration = time.perf_counter() - baseline.started_at
-            task_emission_data.duration = Time.from_seconds(request_duration).seconds
+            # compute_delta_emission subtracts previous.duration, so pass the
+            # absolute elapsed here; the delta is then the request duration and
+            # emissions_rate is computed against it (not against a negative).
+            task_emission_data.duration = (
+                baseline.duration_at_start + Time.from_seconds(request_duration).seconds
+            )
             task_emission_data.compute_delta_emission(previous)
 
             task.emissions_data = task_emission_data
@@ -995,6 +1000,22 @@ class BaseEmissionsTracker(ABC):
             if isinstance(handler, CodeCarbonAPIOutput):
                 handler.task_out(task_payload, self._experiment_name)
                 task.uploaded_to_api = True
+
+    def discard_task(self, task_name: str) -> None:
+        """Drop a finished task record so ``_tasks`` stays bounded.
+
+        Long-lived servers create one task per HTTP request; without eviction
+        ``_tasks`` grows for the process lifetime. Call after
+        :meth:`persist_completed_task` (data already left the tracker by then).
+
+        Args:
+            task_name: Name of the task to forget. Unknown names are ignored.
+        """
+        with self._http_task_lock:
+            task = self._tasks.get(task_name)
+            if task is None or task.is_active:
+                return
+            del self._tasks[task_name]
 
     @suppress(Exception)
     def flush(self) -> Optional[float]:
