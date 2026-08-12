@@ -689,6 +689,133 @@ class TestCarbonTracker(unittest.TestCase):
         self.assertEqual(first_emissions, second_emissions)
         self.verify_output_file(self.emissions_file_path, 2)
 
+    def test_restart_reacquires_the_lock(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        with mock.patch("codecarbon.emissions_tracker.Lock") as mock_lock_class:
+            tracker = OfflineEmissionsTracker(
+                country_iso_code="USA",
+                output_dir=self.temp_path,
+                experiment_id="test",
+                allow_multiple_runs=False,
+            )
+            lock = mock_lock_class.return_value
+
+            tracker.start()
+            heavy_computation(run_time_secs=1)
+            tracker.stop()
+            self.assertEqual(lock.acquire.call_count, 1)
+            self.assertEqual(lock.release.call_count, 1)
+
+            # Restarting re-enters the protected section, so the lock has to be
+            # taken back, and released again by the matching stop().
+            tracker.start()
+            heavy_computation(run_time_secs=1)
+            tracker.stop()
+            self.assertEqual(lock.acquire.call_count, 2)
+            self.assertEqual(lock.release.call_count, 2)
+
+            # And a redundant stop() still touches nothing.
+            tracker.stop()
+            self.assertEqual(lock.release.call_count, 2)
+
+    def test_restart_aborts_when_the_lock_is_taken_by_another_instance(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        with mock.patch("codecarbon.emissions_tracker.Lock") as mock_lock_class:
+            tracker = OfflineEmissionsTracker(
+                country_iso_code="USA",
+                output_dir=self.temp_path,
+                experiment_id="test",
+                allow_multiple_runs=False,
+            )
+            tracker.start()
+            heavy_computation(run_time_secs=1)
+            tracker.stop()
+
+            mock_lock_class.return_value.acquire.side_effect = FileExistsError
+            tracker.start()
+
+            # The restart was refused, so the tracker stays stopped, nothing was
+            # rebuilt, and the clash was reported rather than swallowed.
+            self.assertTrue(tracker._another_instance_already_running)
+            self.assertIsNotNone(tracker._stopped_at)
+            self.assertIsNone(tracker._scheduler)
+
+    def test_tracker_can_be_restarted_after_stop(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        # GIVEN
+        tracker = OfflineEmissionsTracker(
+            country_iso_code="USA", measure_power_secs=1, save_to_file=False
+        )
+
+        # WHEN
+        tracker.start()
+        heavy_computation(run_time_secs=2)
+        tracker.stop()
+        first_duration = tracker.final_emissions_data.duration
+
+        time.sleep(2)  # stopped: this gap must not be counted
+
+        tracker.start()
+        self.assertIsNotNone(tracker._scheduler)
+        heavy_computation(run_time_secs=2)
+        tracker.stop()
+        second_duration = tracker.final_emissions_data.duration
+
+        # THEN the second row covers the two active phases only, not the pause
+        self.assertAlmostEqual(first_duration, 2, delta=1)
+        self.assertAlmostEqual(second_duration, 4, delta=1)
+
+    def test_second_start_while_running_is_a_no_op(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        tracker = OfflineEmissionsTracker(
+            country_iso_code="USA", measure_power_secs=1, save_to_file=False
+        )
+        tracker.start()
+        start_time = tracker._start_time
+        scheduler = tracker._scheduler
+
+        with self.assertLogs("codecarbon", level="WARNING") as logs:
+            tracker.start()
+
+        # A restart is only allowed after stop(): while running, start() must not
+        # move the clock nor replace the running schedulers.
+        self.assertTrue(any("Already started tracking" in line for line in logs.output))
+        self.assertEqual(start_time, tracker._start_time)
+        self.assertIs(scheduler, tracker._scheduler)
+        tracker.stop()
+
     def test_offline_tracker_invalid_headers(
         self,
         mock_cli_setup,

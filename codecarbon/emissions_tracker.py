@@ -711,12 +711,33 @@ class BaseEmissionsTracker(ABC):
                 "Another instance of codecarbon is already running. Exiting."
             )
             return
-        if self._start_time is not None:
+        if self._start_time is not None and self._stopped_at is None:
             logger.warning("Already started tracking")
             return
 
         self._ensure_hardware_ready()
-        self._last_measured_time = self._start_time = time.perf_counter()
+        now = time.perf_counter()
+        if self._stopped_at is None:
+            self._start_time = now
+        else:
+            # Restarting after a stop(). Undo what stop() tore down, in reverse
+            # order: take the lock back, then rebuild the schedulers it dropped.
+            if not self._allow_multiple_runs:
+                try:
+                    self._lock.acquire()
+                except FileExistsError:
+                    logger.error(
+                        f"Error: Another instance of codecarbon is probably running as we find `{self._lock.lockfile_path}`. Turn off the other instance to be able to run this one or use `allow_multiple_runs` or delete the file. Exiting."
+                    )
+                    self._another_instance_already_running = True
+                    return
+            self._initialize_scheduler_state()
+            # The energy accumulators are kept across the restart, so shift the
+            # start time by the stopped interval to keep `duration` and the
+            # accumulators on the same clock (active time only).
+            self._start_time += now - self._stopped_at
+            self._stopped_at = None
+        self._last_measured_time = now
 
         # Clear utilization history for fresh measurements
         self._cpu_utilization_history.clear()
@@ -943,6 +964,9 @@ class BaseEmissionsTracker(ABC):
         self.final_emissions_data = emissions_data
         self.final_emissions = emissions_data.emissions
 
+        # Every stop() ends a run, so the handlers are torn down here even
+        # though start() may resume the tracker later: they are re-usable, a
+        # later out() re-creates whatever exit() cleaned up.
         for handler in self._output_handlers:
             handler.exit()
 

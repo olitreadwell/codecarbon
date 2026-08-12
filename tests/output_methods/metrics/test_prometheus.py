@@ -57,6 +57,21 @@ class TestPrometheusOutput(unittest.TestCase):
         output.exit()
         mock_delete.assert_called_once_with("url", job="custom_job")
 
+    @patch("codecarbon.output_methods.metrics.prometheus.delete_from_gateway")
+    @patch("codecarbon.output_methods.metrics.prometheus.push_to_gateway")
+    def test_exit_does_not_prevent_a_later_out(self, mock_push, mock_delete):
+        # A tracker can be restarted after stop(), which means exit() may be
+        # followed by another out(). The push re-creates the job that exit()
+        # deleted, so the handler stays usable.
+        output = prometheus.PrometheusOutput("url", job_name="custom_job")
+        output.out(total=EMISSIONS_DATA, delta=EMISSIONS_DATA)
+        output.exit()
+        output.out(total=EMISSIONS_DATA, delta=EMISSIONS_DATA)
+
+        self.assertEqual(mock_push.call_count, 2)
+        self.assertEqual(mock_push.call_args.kwargs["job"], "custom_job")
+        mock_delete.assert_called_once_with("url", job="custom_job")
+
     @patch(
         "codecarbon.output_methods.metrics.prometheus.push_to_gateway",
         side_effect=Exception("Test error"),
