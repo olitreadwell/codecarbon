@@ -272,8 +272,17 @@ class BaseEmissionsTracker(ABC):
         Id of the current run. It is the API run id as soon as the API output
         method has created one, and a locally generated uuid otherwise.
         """
-        api_run_id = getattr(self._api_output, "run_id", None)
-        return api_run_id if api_run_id is not None else self._run_id
+        if self._api_output is not None and self._api_output.run_id is not None:
+            return self._api_output.run_id
+        return self._run_id
+
+    @run_id.setter
+    def run_id(self, value) -> None:
+        """
+        `run_id` used to be a plain attribute ; keep it writable for callers
+        that set their own id. An API run id, once created, still wins.
+        """
+        self._run_id = value
 
     def _initialize_runtime_state(self) -> None:
         self._api_output = None

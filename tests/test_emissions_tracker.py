@@ -391,8 +391,11 @@ class TestCarbonTracker(unittest.TestCase):
 
             mock_create_run.side_effect = create_run
 
-            # Before the run is created, the tracker falls back on a local uuid.
+            # Before the run is created, the tracker falls back on a local uuid,
+            # which stays writable for callers that set their own id.
             self.assertIsNotNone(tracker.run_id)
+            tracker.run_id = "caller-provided"
+            self.assertEqual(tracker.run_id, "caller-provided")
 
             tracker.start()
             heavy_computation(1)
