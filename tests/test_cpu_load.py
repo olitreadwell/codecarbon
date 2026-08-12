@@ -189,23 +189,39 @@ class TestCPULoad(unittest.TestCase):
             None, MODE_CPU_LOAD, "Intel(R) Core(TM) i7-7600U CPU @ 2.80GHz", 100
         )
 
-        class InjectingHistory(list):
-            """Simulates the monitor thread firing while the history is read."""
+        class ProbedHistory(list):
+            """Runs the monitor thread's write the first time `total_power`
+            touches the history, whichever way it reads it."""
 
-            injected = False
+            fired = False
 
-            def __iter__(inner):
-                items = list.__iter__(inner)
-                for item in items:
-                    yield item
-                if not inner.injected:
-                    inner.injected = True
+            def _fire(inner):
+                if not inner.fired:
+                    inner.fired = True
                     cpu.monitor_power()
 
-        cpu._power_history = InjectingHistory([Power.from_watts(1)])
+            def __iter__(inner):
+                inner._fire()
+                return list.__iter__(inner)
+
+            def __len__(inner):
+                inner._fire()
+                return list.__len__(inner)
+
+            def __getitem__(inner, index):
+                inner._fire()
+                return list.__getitem__(inner, index)
+
+            def copy(inner):
+                inner._fire()
+                return list.copy(inner)
+
+        cpu._power_history = ProbedHistory([Power.from_watts(1)])
 
         cpu.total_power()
 
+        # The interleaved sample must survive the drain, whatever the drain
+        # is implemented with.
         self.assertEqual(len(cpu._power_history), 1)
 
     @mock.patch(
