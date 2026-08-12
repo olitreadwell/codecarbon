@@ -45,6 +45,24 @@ class GPUDevice:
             return self.last_energy
         return Energy.from_millijoules(total_energy_consumption)
 
+    def _delta_from_power(self, duration: Time) -> None:
+        """Estimate this window's energy by integrating instantaneous power.
+
+        A card missing the energy counter may also fail on the power query, and
+        that exception would otherwise bubble up to ``AllGPUDevices.get_delta``
+        and drop the readings of *every* GPU for this sample.
+        """
+        try:
+            self.power = Power.from_watts(self._get_power_usage())
+        except Exception:
+            logger.warning(
+                f"Failed to retrieve power usage of GPU {self.gpu_index}, "
+                "reporting 0 W for this measurement.",
+                exc_info=True,
+            )
+            self.power = Power.from_watts(0.0)
+        self.energy_delta = Energy.from_power_and_time(power=self.power, time=duration)
+
     def delta(self, duration: Time) -> dict:
         """
         Compute the energy/power used since last call.
@@ -63,16 +81,24 @@ class GPUDevice:
                     "falling back to integrating instantaneous power usage. "
                     "Measurements will be less accurate."
                 )
-            self.power = Power.from_watts(self._get_power_usage())
-            self.energy_delta = Energy.from_power_and_time(
-                power=self.power, time=duration
-            )
+            # `last_energy` is now stale: the device counter (if it ever comes
+            # back) kept running during this window, which we are about to
+            # report from power integration.
+            self._energy_baseline_stale = True
+            self._delta_from_power(duration)
         else:
             energy = Energy.from_millijoules(total_energy_consumption)
-            self.power = Power.from_energies_and_delay(
-                energy, self.last_energy, duration
-            )
-            self.energy_delta = energy - self.last_energy
+            if getattr(self, "_energy_baseline_stale", False):
+                # Counter came back after a fallback window. `energy -
+                # last_energy` would cover the fallback window too, which we
+                # already reported, so re-baseline and integrate power once more.
+                self._energy_baseline_stale = False
+                self._delta_from_power(duration)
+            else:
+                self.power = Power.from_energies_and_delay(
+                    energy, self.last_energy, duration
+                )
+                self.energy_delta = energy - self.last_energy
             self.last_energy = energy
         return {
             "name": self._gpu_name,
@@ -147,4 +173,4 @@ class GPUDevice:
         Backends that need to emit warnings for selected devices should override
         this method. The default implementation is intentionally a no-op.
         """
-        return
+        return None

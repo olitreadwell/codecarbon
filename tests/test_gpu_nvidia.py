@@ -299,6 +299,75 @@ class TestGpu(FakeGPUEnv):
         finally:
             pynvml.nvmlDeviceGetTotalEnergyConsumption = original_energy
 
+    def test_gpu_energy_counter_recovery_does_not_double_count(self):
+        """
+        A device whose counter is intermittently unavailable must not report the
+        fallback window a second time when the counter comes back.
+        """
+        import pynvml
+
+        from codecarbon.core.gpu import AllGPUDevices
+        from codecarbon.core.units import Time
+
+        original_energy = pynvml.nvmlDeviceGetTotalEnergyConsumption
+        try:
+            alldevices = AllGPUDevices()  # baseline read: 1000 mJ
+
+            def raise_exception(handle):
+                raise pynvml.NVMLError("Not Supported")
+
+            pynvml.nvmlDeviceGetTotalEnergyConsumption = raise_exception
+            fallback = alldevices.get_delta(Time.from_seconds(3600))
+            assert fallback[0]["delta_energy_consumption"].kWh == pytest.approx(0.026)
+
+            # Counter comes back, having advanced by the 0.026 kWh we just
+            # reported, while the power draw dropped to 10 W.
+            pynvml.nvmlDeviceGetTotalEnergyConsumption = original_energy
+            self.DETAILS["handle_0"]["total_energy_consumption"] = 1000 + 93_600_000
+            self.DETAILS["handle_0"]["power_usage"] = 10000
+
+            recovered = alldevices.get_delta(Time.from_seconds(3600))
+            assert recovered[0]["delta_energy_consumption"].kWh == pytest.approx(0.010)
+
+            # Subsequent samples use the counter again, from the new baseline.
+            self.DETAILS["handle_0"]["total_energy_consumption"] = (
+                1000 + 93_600_000 + 36_000_000
+            )
+            after = alldevices.get_delta(Time.from_seconds(3600))
+            assert after[0]["delta_energy_consumption"].kWh == pytest.approx(0.010)
+        finally:
+            pynvml.nvmlDeviceGetTotalEnergyConsumption = original_energy
+
+    def test_gpu_power_query_failure_does_not_drop_other_gpus(self):
+        """
+        A device failing both the energy and the power query must not wipe out
+        the readings of every other GPU.
+        """
+        import pynvml
+
+        from codecarbon.core.gpu import AllGPUDevices
+        from codecarbon.core.units import Time
+
+        original_energy = pynvml.nvmlDeviceGetTotalEnergyConsumption
+        original_power = pynvml.nvmlDeviceGetPowerUsage
+        try:
+            alldevices = AllGPUDevices()
+
+            def raise_exception(handle):
+                raise pynvml.NVMLError("Not Supported")
+
+            pynvml.nvmlDeviceGetTotalEnergyConsumption = raise_exception
+            pynvml.nvmlDeviceGetPowerUsage = raise_exception
+
+            devices_info = alldevices.get_delta(Time.from_seconds(3600))
+
+            assert len(devices_info) == 2
+            assert devices_info[0]["power_usage"].W == 0
+            assert devices_info[0]["delta_energy_consumption"].kWh == 0
+        finally:
+            pynvml.nvmlDeviceGetTotalEnergyConsumption = original_energy
+            pynvml.nvmlDeviceGetPowerUsage = original_power
+
     def test_gpu_metadata_total_power(self):
         """
         Get the total power of all GPUs
