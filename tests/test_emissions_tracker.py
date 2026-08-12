@@ -656,6 +656,39 @@ class TestCarbonTracker(unittest.TestCase):
         self.assertEqual(first_emissions, second_emissions)
         self.verify_output_file(self.emissions_file_path, 2)
 
+    def test_stop_releases_the_lock_only_once(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        with mock.patch("codecarbon.emissions_tracker.Lock") as mock_lock_class:
+            tracker = OfflineEmissionsTracker(
+                country_iso_code="USA",
+                output_dir=self.temp_path,
+                experiment_id="test",
+                allow_multiple_runs=False,
+            )
+            lock = mock_lock_class.return_value
+            lock.acquire.assert_called_once()
+
+            tracker.start()
+            heavy_computation(run_time_secs=1)
+            first_emissions = tracker.stop()
+            lock.release.assert_called_once()
+
+            # A second stop() is a no-op: it must not touch the lock again, which
+            # by then may belong to another tracker.
+            second_emissions = tracker.stop()
+            lock.release.assert_called_once()
+
+        self.assertEqual(first_emissions, second_emissions)
+        self.verify_output_file(self.emissions_file_path, 2)
+
     def test_offline_tracker_invalid_headers(
         self,
         mock_cli_setup,
