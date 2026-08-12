@@ -1,3 +1,4 @@
+import signal
 import threading
 import unittest
 from unittest.mock import mock_open, patch
@@ -75,6 +76,45 @@ class TestLock(unittest.TestCase):
         # Ensure that the lock file was created and removed correctly
         self.assertTrue(mock_file.called)
         self.assertTrue(mock_remove.called)
+
+
+class TestLockSignalHandlers(unittest.TestCase):
+    """The lock must not permanently steal the host application's handlers."""
+
+    def setUp(self):
+        self.original_handlers = {
+            sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)
+        }
+
+    def tearDown(self):
+        for sig, handler in self.original_handlers.items():
+            signal.signal(sig, handler)
+
+    def test_release_restores_previous_handlers(self):
+        def sentinel(signum, frame):
+            pass
+
+        signal.signal(signal.SIGTERM, sentinel)
+        lock = Lock()
+        self.assertEqual(signal.getsignal(signal.SIGTERM), lock._handle_exit)
+        lock.release()
+        self.assertIs(signal.getsignal(signal.SIGTERM), sentinel)
+        self.assertIs(
+            signal.getsignal(signal.SIGINT), self.original_handlers[signal.SIGINT]
+        )
+
+    @unittest.skipIf(
+        not hasattr(signal, "raise_signal"), "requires signal.raise_signal (3.8+)"
+    )
+    @patch("codecarbon.lock.os.remove")
+    def test_signal_is_forwarded_to_previous_handler(self, mock_remove):
+        received = []
+
+        signal.signal(signal.SIGTERM, lambda signum, frame: received.append(signum))
+        lock = Lock()
+        signal.raise_signal(signal.SIGTERM)
+        self.assertEqual(received, [signal.SIGTERM])
+        self.assertFalse(lock._previous_handlers)
 
 
 if __name__ == "__main__":

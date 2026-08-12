@@ -23,22 +23,34 @@ class Lock:
     def __init__(self):
         self._has_created_lock = False
         self.lockfile_path = LOCKFILE
+        # Keep one reference to the bound method: atexit.unregister() matches on
+        # identity, so registering `self.release` twice would not be undoable.
+        self._atexit_hook = self.release
         atexit.register(
-            self.release
+            self._atexit_hook
         )  # Ensure release() is called on unexpected exit of the user's python code
         # If there is more than one thread add a lock
         self._thread_lock = threading.Lock()
+        # Previous signal handlers, restored on release() so we do not take
+        # permanent ownership of the host application's signal disposition.
+        self._previous_handlers = {}
         # If the current thread is the main thread, register signal handlers
         if threading.current_thread() is threading.main_thread():
             # Register signal handlers to ensure lock release on interruption
-            signal.signal(signal.SIGINT, self._handle_exit)  # Ctrl+C
-            signal.signal(signal.SIGTERM, self._handle_exit)  # Termination signal
+            for sig in (signal.SIGINT, signal.SIGTERM):  # Ctrl+C, termination signal
+                self._previous_handlers[sig] = signal.signal(sig, self._handle_exit)
 
     def _handle_exit(self, signum, frame):
-        """Ensures the lock file is removed when the script is interrupted."""
-        logger.debug(f"Signal {signum} received. Releasing lock and exiting.")
-        self.release()
-        raise SystemExit(1)  # Exit gracefully to prevent further execution
+        """Releases the lock, then delegates to the handler we replaced."""
+        logger.debug(f"Signal {signum} received. Releasing lock.")
+        previous = self._previous_handlers.get(signum, signal.SIG_DFL)
+        self.release()  # also restores the previous handlers
+        if callable(previous):
+            return previous(signum, frame)
+        if previous == signal.SIG_DFL:
+            # Reproduce the default disposition (usually terminate).
+            os.kill(os.getpid(), signum)
+        # signal.SIG_IGN: nothing to do
 
     def acquire(self):
         """Creates a lock file and ensures it's the only instance running."""
@@ -55,9 +67,15 @@ class Lock:
                 raise
 
     def release(self):
-        """Removes the lock file on exit."""
+        """Removes the lock file and restores the signal handlers we replaced."""
         with self._thread_lock:
             logger.debug("Removing the lock")
+            while self._previous_handlers:
+                sig, handler = self._previous_handlers.popitem()
+                # Only restore if nobody installed another handler after us.
+                if signal.getsignal(sig) == self._handle_exit:
+                    signal.signal(sig, handler)
+            atexit.unregister(self._atexit_hook)
             try:
                 # Remove the lock file only if it was created by this instance
                 if self._has_created_lock:
