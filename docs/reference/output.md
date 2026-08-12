@@ -13,7 +13,7 @@ tracker = EmissionsTracker(
 )
 ```
 
-Available values: `CSV`, `API`, `LOGGER`, `PROMETHEUS`, `LOGFIRE`, `BOAMPS`.
+Available values: `CSV`, `API`, `LOGGER`, `PROMETHEUS`, `LOGFIRE`, `BOAMPS`, `SCI`.
 It can also be set in the config file as a comma-separated string, e.g.
 `output_methods=csv,api`. HTTP output is enabled separately via the
 `emissions_endpoint` parameter.
@@ -211,3 +211,91 @@ You can send all your data to the CodeCarbon API so you have your historical dat
 ## Logger Output
 
 See [Collecting emissions to a logger](../how-to/logging.md).
+
+## SCI
+
+The [Software Carbon Intensity](https://sci.greensoftware.foundation/) specification, standardised as ISO/IEC 21031:2024, expresses a workload's footprint as a rate:
+
+```
+SCI = (E * I + M) / R
+```
+
+CodeCarbon measures `E` (energy consumed, kWh) and applies `I` (carbon intensity, gCO2eq/kWh). The two remaining terms are declarations that only you can make:
+
+- `R`, the functional unit — one request, one training run, 1k tokens. There is no sensible default, so if you do not declare one the report is still written, with `sci: null` and a `status` field saying why.
+- `M`, the embodied emissions attributable to the run. CodeCarbon has no hardware manufacturing data and will not invent any; when you do not declare a figure the report says `"M_source": "not declared"` so a reader can see the report is a partial one.
+
+### How to use it
+
+```python-skip
+from codecarbon import EmissionsTracker
+from codecarbon.output_methods.sci import EmbodiedDeclaration, FunctionalUnit, SCIOutput
+
+sci = SCIOutput(
+    functional_unit=FunctionalUnit(name="inference request", count=10_000),
+    embodied=EmbodiedDeclaration(gCO2e=42.5, source="vendor LCA, 4y amortization"),
+    output_dir="reports",
+)
+tracker = EmissionsTracker(output_handlers=[sci])
+```
+
+When the count is only known at the end of the run, declare it before stopping the tracker:
+
+```python-skip
+sci.set_functional_unit_count(len(results))
+```
+
+The declarations can also live in a JSON context file, which is what the `sci` output method reads when you enable it through configuration:
+
+```json
+{
+  "functionalUnit": {"name": "inference request", "count": 10000},
+  "embodied": {"gCO2e": 42.5, "source": "manufacturer LCA, 4y amortization"},
+  "reporter": {"organization": "Acme", "contact": "green@acme.example"},
+  "boundary": "Application only; excludes client devices and network."
+}
+```
+
+```ini
+[codecarbon]
+output_methods = csv,sci
+sci_context_file = ./sci_context.json
+```
+
+```python-skip
+from codecarbon.output_methods.sci import SCIOutput
+
+sci = SCIOutput.from_file("sci_context.json")
+```
+
+CodeCarbon writes a final report named `sci_report_<run_id>.json` in `output_dir`, plus `sci_report_tasks_<run_id>.json` when tasks are used. `I` is derived as `emissions * 1000 / energy_consumed` rather than recomputed, so the report is consistent with the CSV by construction; the PUE that was applied is recorded separately in the provenance block.
+
+Sample output:
+```json
+{
+  "specVersion": "ISO/IEC 21031:2024",
+  "generatedBy": "codecarbon 3.2.6",
+  "runId": "79e4408f-ec31-476f-a2c5-8ca7f53e6cc7",
+  "projectName": "my_project",
+  "timestamp": "2025-01-15T10:30:00",
+  "sci": 0.0000127,
+  "unit": "gCO2eq per inference request",
+  "terms": {
+    "E_kWh": 0.1007,
+    "I_gCO2e_per_kWh": 417.08,
+    "M_gCO2e": 42.5,
+    "R": 10000,
+    "R_name": "inference request"
+  },
+  "provenance": {
+    "I_source": "codecarbon regional intensity, country_iso_code=FRA",
+    "M_source": "manufacturer LCA, 4y amortization",
+    "measurementBoundary": "Application only; excludes client devices and network.",
+    "durationSeconds": 3600.0,
+    "hardware": {"cpu": "Intel Xeon", "gpu": "NVIDIA A100", "ramTotalGB": 64.0},
+    "pue": 1
+  }
+}
+```
+
+See [examples/sci_output.py](https://github.com/mlco2/codecarbon/blob/master/examples/sci_output.py) for a runnable example.
