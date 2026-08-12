@@ -339,9 +339,14 @@ def test_rapl_both_parameters_together(tmp_path):
     assert (
         len(rapl2._rapl_files) == 2
     ), f"Expected 2 files (package + dram), got {len(rapl2._rapl_files)}"
+    # Both domains get an aggregated name so their energy is summed in the total
     names = [f.name for f in rapl2._rapl_files]
-    assert any("Processor Energy" in name for name in names), "Missing package domain"
-    assert any("dram" in name.lower() for name in names), "Missing DRAM domain"
+    assert all(
+        "Processor Energy" in name for name in names
+    ), f"All selected domains should be aggregated, got: {names}"
+    paths = [f.path for f in rapl2._rapl_files]
+    assert any("intel-rapl:0" in path for path in paths), "Missing package domain"
+    assert any("intel-rapl:1" in path for path in paths), "Missing DRAM domain"
 
     # Test 3: rapl_prefer_psys=False with rapl_include_dram=False (should use only package)
     rapl3 = IntelRAPL(
