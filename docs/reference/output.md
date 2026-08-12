@@ -268,7 +268,10 @@ from codecarbon.output_methods.sci import SCIOutput
 sci = SCIOutput.from_file("sci_context.json")
 ```
 
-CodeCarbon writes a final report named `sci_report_<run_id>.json` in `output_dir`, plus `sci_report_tasks_<run_id>.json` when tasks are used. `I` is derived as `emissions * 1000 / energy_consumed` rather than recomputed, so the report is consistent with the CSV by construction; the PUE that was applied is recorded separately in the provenance block.
+!!! warning "The configuration-only path needs a count in the context file"
+    `set_functional_unit_count()` needs a reference to the handler, and the handler created by `output_methods = csv,sci` is owned by the tracker. So with configuration alone, `sci` is `null` in every report unless `functionalUnit.count` is hardcoded in `sci_context_file`. If the count is only known at the end of the run, construct `SCIOutput` yourself and pass it via `output_handlers=[...]`.
+
+CodeCarbon writes a final report named `sci_report_<run_id>.json` in `output_dir`, plus `sci_report_tasks_<run_id>.json` when tasks are used. In the task report, `M` is apportioned across tasks by their share of the run's duration: the declared `M` is the embodied carbon of the device for the whole run, so giving each task the full figure would count it once per task. `I` is derived as `emissions * 1000 / energy_consumed` rather than recomputed, so the report is consistent with the CSV by construction; the PUE that was applied is recorded separately in the provenance block.
 
 Sample output:
 ```json

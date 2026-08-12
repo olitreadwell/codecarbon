@@ -262,9 +262,66 @@ class TestSCIOutput(unittest.TestCase):
         ) as f:
             report = json.load(f)
         self.assertEqual(report["experimentName"], "experiment")
-        self.assertAlmostEqual(report["tasks"][0]["sci"], (0.2 * 1000 + 10.0) / 100)
-        self.assertAlmostEqual(report["tasks"][1]["sci"], (0.1 * 1000 + 10.0) / 100)
-        self.assertEqual(report["tasks"][0]["provenance"]["M_source"], "vendor LCA")
+        # equal durations, so each task carries half of the declared M
+        self.assertAlmostEqual(report["tasks"][0]["sci"], (0.2 * 1000 + 5.0) / 100)
+        self.assertAlmostEqual(report["tasks"][1]["sci"], (0.1 * 1000 + 5.0) / 100)
+        self.assertIn("vendor LCA", report["tasks"][0]["provenance"]["M_source"])
+        self.assertIn(
+            "apportioned by duration", report["tasks"][0]["provenance"]["M_source"]
+        )
+
+    def test_task_out_apportions_embodied_by_duration(self):
+        # The whole point: M is the device's embodied carbon for the whole run.
+        # Handing every task the full M would report it once per task.
+        tasks = [
+            _make_task_data("short", duration=100.0),
+            _make_task_data("long", duration=300.0),
+        ]
+        handler = SCIOutput(
+            output_dir=self.temp_dir,
+            functional_unit=FunctionalUnit(name="request", count=100),
+            embodied=EmbodiedDeclaration(gco2e=40.0, source="vendor LCA"),
+        )
+        handler.task_out(tasks, "experiment")
+
+        with open(
+            os.path.join(self.temp_dir, f"sci_report_tasks_{tasks[0].run_id}.json")
+        ) as f:
+            report = json.load(f)
+        shares = [t["terms"]["M_gCO2e"] for t in report["tasks"]]
+        self.assertAlmostEqual(shares[0], 10.0)
+        self.assertAlmostEqual(shares[1], 30.0)
+        # the split is exhaustive: the run's M is counted exactly once
+        self.assertAlmostEqual(sum(shares), 40.0)
+        self.assertIn("25.0% of the run", report["tasks"][0]["provenance"]["M_source"])
+
+    def test_task_out_without_embodied_stays_undeclared(self):
+        tasks = [_make_task_data("train")]
+        SCIOutput(
+            output_dir=self.temp_dir,
+            functional_unit=FunctionalUnit(name="request", count=100),
+        ).task_out(tasks, "experiment")
+
+        with open(
+            os.path.join(self.temp_dir, f"sci_report_tasks_{tasks[0].run_id}.json")
+        ) as f:
+            report = json.load(f)
+        self.assertEqual(report["tasks"][0]["terms"]["M_gCO2e"], 0.0)
+        self.assertEqual(report["tasks"][0]["provenance"]["M_source"], "not declared")
+
+    def test_task_out_with_zero_duration_does_not_divide_by_zero(self):
+        tasks = [_make_task_data("instant", duration=0.0)]
+        SCIOutput(
+            output_dir=self.temp_dir,
+            functional_unit=FunctionalUnit(name="request", count=100),
+            embodied=EmbodiedDeclaration(gco2e=40.0, source="vendor LCA"),
+        ).task_out(tasks, "experiment")
+
+        with open(
+            os.path.join(self.temp_dir, f"sci_report_tasks_{tasks[0].run_id}.json")
+        ) as f:
+            report = json.load(f)
+        self.assertEqual(report["tasks"][0]["terms"]["M_gCO2e"], 0.0)
 
     def test_live_out_is_noop(self):
         data = _make_emissions_data()

@@ -234,15 +234,37 @@ class SCIOutput(BaseOutput):
         except Exception as e:
             logger.error(f"Failed to write SCI report: {e}", exc_info=True)
 
+    def _embodied_share(self, share: float) -> Optional[EmbodiedDeclaration]:
+        """The slice of the declared ``M`` that belongs to one task."""
+        if self._embodied is None:
+            return None
+        return EmbodiedDeclaration(
+            gco2e=self._embodied.gco2e * share,
+            source=(
+                f"{self._embodied.source or 'declared'}; "
+                f"apportioned by duration ({share:.1%} of the run)"
+            ),
+        )
+
     def task_out(self, data: List[TaskEmissionsData], experiment_name: str):
-        """Write one SCI report per task, sharing the run-level declarations."""
+        """
+        Write one SCI report per task, sharing the run-level declarations.
+
+        ``M`` is embodied carbon of the whole device over the whole run, so each
+        task gets the slice matching its share of the run's duration. Giving
+        every task the full ``M`` would report the device's embodied carbon once
+        per task; apportioning it keeps the per-task figures summing back to the
+        run-level report.
+        """
         try:
+            total_duration = sum(task.duration for task in data)
             reports = []
             for task in data:
+                share = task.duration / total_duration if total_duration else 0.0
                 report = map_emissions_to_sci(
                     task,
                     functional_unit=self._functional_unit,
-                    embodied=self._embodied,
+                    embodied=self._embodied_share(share),
                     reporter=self._reporter,
                     boundary=self._boundary,
                 )
