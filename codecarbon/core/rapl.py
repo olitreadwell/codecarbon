@@ -77,6 +77,19 @@ class RAPLFile:
                 f"In RAPLFile : Current energy value ({energy}) is lower than previous value ({self.last_energy}). Assuming wrap-around! Source file : {self.path}"
             )
             energy = energy + self.max_energy_reading
+            if self.last_energy > energy:
+                # The counter went backwards and we cannot correct it (unknown
+                # max_energy_range_uj, driver reset, suspend/resume, transient
+                # read error...). Skip this sample rather than reporting a
+                # negative energy delta, which would corrupt the totals.
+                logger.warning(
+                    "In RAPLFile : counter went backwards and cannot be corrected for %s; skipping this sample.",
+                    self.path,
+                )
+                self.energy_delta = Energy(0)
+                self.power = Power(0)
+                self.last_energy = new_last_energy
+                return
         self.power = self.power.from_energies_and_delay(
             energy, self.last_energy, duration
         )
