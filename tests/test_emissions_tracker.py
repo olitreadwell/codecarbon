@@ -404,6 +404,47 @@ class TestCarbonTracker(unittest.TestCase):
         emissions_df = pd.read_csv(self.emissions_file_path)
         self.assertEqual(emissions_df["run_id"].iloc[0], "run-created")
 
+    def test_run_id_falls_back_to_uuid_when_api_run_creation_fails(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        with (
+            mock.patch(
+                "codecarbon.output_methods.http.ApiClient._create_run",
+                side_effect=Exception("API is down"),
+            ),
+            mock.patch("codecarbon.output_methods.http.ApiClient.add_emission"),
+        ):
+            tracker = EmissionsTracker(
+                output_dir=self.temp_path,
+                output_handlers=[],
+                output_methods=[OutputMethod.CSV, OutputMethod.API],
+                experiment_id="test-experiment-id",
+                api_key="test-api-key",
+            )
+            local_run_id = tracker.run_id
+
+            with self.assertLogs("codecarbon", level="ERROR") as logs:
+                tracker.start()
+            # The API failure is reported but does not abort the tracking.
+            self.assertTrue(any("API is down" in line for line in logs.output))
+            self.assertIsNotNone(tracker._start_time)
+
+            heavy_computation(1)
+            tracker.stop()
+
+        # No API run id available: the tracker keeps its local uuid, and it is
+        # what gets persisted.
+        self.assertEqual(tracker.run_id, local_run_id)
+        emissions_df = pd.read_csv(self.emissions_file_path)
+        self.assertEqual(emissions_df["run_id"].iloc[0], str(local_run_id))
+
     def test_default_output_methods_is_csv(
         self,
         mock_cli_setup,
