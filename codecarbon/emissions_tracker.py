@@ -501,7 +501,9 @@ class BaseEmissionsTracker(ABC):
                                 `sudo lshw -C memory -short | grep DIMM` to get RAM slots,
                                 then RAM power (W) = Number of RAM Slots × 5 Watts.
         :param pue: PUE (Power Usage Effectiveness) of the data center where the
-                    experiment is being run.
+                    experiment is being run. It multiplies both the reported power
+                    and the reported energy, including forced values: with
+                    `force_cpu_power=100` and `pue=1.5` the CPU is reported at 150 W.
         :param wue: WUE (Water Usage Effectiveness) of the data center. Units of L/kWh:
                     litres of water consumed per kilowatt-hour of electricity consumed.
         :param force_carbon_intensity_g_co2e_kwh: Override grid carbon intensity
@@ -1586,7 +1588,9 @@ def track_emissions(
     :param force_ram_power: Force the RAM power consumption in watts. Estimate with
                             `sudo lshw -C memory -short | grep DIMM` for RAM slots,
                             then RAM power (W) = Number of RAM Slots × 5 Watts.
-    :param pue: PUE (Power Usage Effectiveness) of the data center.
+    :param pue: PUE (Power Usage Effectiveness) of the data center. It multiplies both
+                the reported power and the reported energy, including forced values:
+                with `force_cpu_power=100` and `pue=1.5` the CPU is reported at 150 W.
     :param wue: WUE (Water Usage Effectiveness) of the data center. Units of L/kWh:
                 litres of water consumed per kilowatt-hour of electricity consumed.
     :param force_carbon_intensity_g_co2e_kwh: Override grid carbon intensity
