@@ -1,3 +1,4 @@
+import os
 import signal
 import threading
 import unittest
@@ -115,6 +116,45 @@ class TestLockSignalHandlers(unittest.TestCase):
         signal.raise_signal(signal.SIGTERM)
         self.assertEqual(received, [signal.SIGTERM])
         self.assertFalse(lock._previous_handlers)
+
+    @unittest.skipIf(
+        not hasattr(signal, "raise_signal"), "requires signal.raise_signal (3.8+)"
+    )
+    @patch("codecarbon.lock.os.kill")
+    @patch("codecarbon.lock.os.remove")
+    def test_default_disposition_is_reproduced(self, mock_remove, mock_kill):
+        # No handler installed by the host application: the default disposition
+        # of SIGTERM is to terminate, which the lock must reproduce after having
+        # released the lock instead of silently swallowing the signal.
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        lock = Lock()
+        lock._has_created_lock = True
+
+        signal.raise_signal(signal.SIGTERM)
+
+        mock_kill.assert_called_once_with(os.getpid(), signal.SIGTERM)
+        # The lock was released before re-raising, and the default disposition
+        # was put back so the re-raised signal is not caught again.
+        self.assertTrue(mock_remove.called)
+        self.assertIs(signal.getsignal(signal.SIGTERM), signal.SIG_DFL)
+
+    @unittest.skipIf(
+        not hasattr(signal, "raise_signal"), "requires signal.raise_signal (3.8+)"
+    )
+    @patch("codecarbon.lock.os.kill")
+    @patch("codecarbon.lock.os.remove")
+    def test_ignored_signal_stays_ignored(self, mock_remove, mock_kill):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        lock = Lock()
+        lock._has_created_lock = True
+
+        signal.raise_signal(signal.SIGTERM)
+
+        # The host application asked to ignore SIGTERM: release the lock, but do
+        # not terminate on its behalf.
+        self.assertTrue(mock_remove.called)
+        mock_kill.assert_not_called()
+        self.assertIs(signal.getsignal(signal.SIGTERM), signal.SIG_IGN)
 
 
 if __name__ == "__main__":
