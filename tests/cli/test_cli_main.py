@@ -419,11 +419,50 @@ def test_monitor_delegates_online_mode_to_run_and_monitor(monkeypatch):
     monkeypatch.setattr("codecarbon.cli.monitor.run_and_monitor", fake_run_and_monitor)
     monkeypatch.setattr(cli_main, "get_existing_exp_id", lambda: "exp-1")
 
+    monkeypatch.setattr(
+        "codecarbon.core.config.get_hierarchical_config", lambda: {}, raising=False
+    )
+
     ctx = SimpleNamespace(args=["python", "train.py"])
     result = cli_main.monitor(ctx=ctx, api=True)
     assert result == "ok"
     assert captured["offline"] is False
     assert captured["kwargs"]["output_methods"] == [OutputMethod.CSV, OutputMethod.API]
+
+
+@pytest.mark.parametrize(
+    "conf, expected",
+    [
+        # `--api` must add to the configured methods, not replace them.
+        (
+            {"output_methods": "prometheus"},
+            [OutputMethod.PROMETHEUS, OutputMethod.API],
+        ),
+        (
+            {"save_to_file": "false", "save_to_logger": "true"},
+            [OutputMethod.LOGGER, OutputMethod.API],
+        ),
+        # Already configured for the API: do not duplicate it.
+        ({"output_methods": "csv,api"}, [OutputMethod.CSV, OutputMethod.API]),
+    ],
+)
+def test_monitor_api_flag_adds_to_configured_output_methods(
+    monkeypatch, conf, expected
+):
+    captured = {}
+
+    def fake_run_and_monitor(ctx, offline=False, **kwargs):
+        captured["kwargs"] = kwargs
+        return "ok"
+
+    monkeypatch.setattr("codecarbon.cli.monitor.run_and_monitor", fake_run_and_monitor)
+    monkeypatch.setattr(cli_main, "get_existing_exp_id", lambda: "exp-1")
+    monkeypatch.setattr(
+        "codecarbon.core.config.get_hierarchical_config", lambda: conf, raising=False
+    )
+
+    cli_main.monitor(ctx=SimpleNamespace(args=["python", "train.py"]), api=True)
+    assert captured["kwargs"]["output_methods"] == expected
 
 
 def test_monitor_delegates_to_run_and_monitor_with_extra_args(monkeypatch):
@@ -441,7 +480,8 @@ def test_monitor_delegates_to_run_and_monitor_with_extra_args(monkeypatch):
     result = cli_main.monitor(ctx=ctx, api=False)
     assert result == "ok"
     assert captured["args"] == ["python", "train.py"]
-    assert "output_methods" not in captured["kwargs"]
+    # --no-api must be able to turn the API output off, not merely stay silent.
+    assert OutputMethod.API not in captured["kwargs"]["output_methods"]
 
 
 def test_monitor_no_api_skips_experiment_id_requirement(monkeypatch):
@@ -459,7 +499,8 @@ def test_monitor_no_api_skips_experiment_id_requirement(monkeypatch):
     result = cli_main.monitor(ctx=ctx, api=False)
     assert result == "ok"
     assert captured["offline"] is False
-    assert "output_methods" not in captured["kwargs"]
+    # --no-api must be able to turn the API output off, not merely stay silent.
+    assert OutputMethod.API not in captured["kwargs"]["output_methods"]
 
 
 def test_monitor_passes_log_level_to_run_and_monitor(monkeypatch):

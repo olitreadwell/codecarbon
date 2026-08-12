@@ -358,6 +358,39 @@ def config():
     )
 
 
+def _configured_output_methods():
+    """
+    The output methods a tracker would pick from configuration alone.
+
+    Mirrors ``BaseEmissionsTracker._resolve_output_methods`` for the case where no
+    output method is passed to the constructor, so that the CLI can *add* to the
+    user's configuration instead of replacing it.
+    """
+    from codecarbon.core.config import get_hierarchical_config
+    from codecarbon.output_methods.base_output import OutputMethod
+
+    conf = get_hierarchical_config()
+
+    configured = conf.get("output_methods")
+    if configured:
+        if isinstance(configured, str):
+            configured = configured.split(",")
+        return [OutputMethod(method.strip()) for method in configured if method.strip()]
+
+    defaults = {
+        OutputMethod.CSV: ("save_to_file", True),
+        OutputMethod.API: ("save_to_api", False),
+        OutputMethod.LOGGER: ("save_to_logger", False),
+        OutputMethod.PROMETHEUS: ("save_to_prometheus", False),
+        OutputMethod.LOGFIRE: ("save_to_logfire", False),
+    }
+    return [
+        method
+        for method, (key, default) in defaults.items()
+        if str(conf.get(key, default)).lower() == "true"
+    ]
+
+
 @codecarbon.command(
     "monitor",
     short_help="Monitor your machine's carbon emissions.",
@@ -422,13 +455,17 @@ def monitor(
             )
             raise typer.Exit(1)
 
-        if api:
-            from codecarbon.output_methods.base_output import OutputMethod
+        from codecarbon.output_methods.base_output import OutputMethod
 
-            tracker_args = {
-                **tracker_args,
-                "output_methods": [OutputMethod.CSV, OutputMethod.API],
-            }
+        # `--api` / `--no-api` add or remove the API output on top of whatever the
+        # user configured, the way the deprecated `save_to_api=True/False` used to.
+        # Hardcoding [CSV, API] here would silently drop a configured Prometheus or
+        # Logfire output and add a CSV file the user never asked for, and passing
+        # nothing for `--no-api` would leave the flag unable to turn the API off.
+        methods = [m for m in _configured_output_methods() if m is not OutputMethod.API]
+        if api:
+            methods.append(OutputMethod.API)
+        tracker_args = {**tracker_args, "output_methods": methods}
 
     from codecarbon.emissions_tracker import EmissionsTracker, OfflineEmissionsTracker
 
