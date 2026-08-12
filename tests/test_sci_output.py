@@ -6,6 +6,7 @@ A. Mapping and arithmetic
 B. Undeclared terms (R and M)
 C. Output handler
 D. Context file loading
+E. Tracker registration
 """
 
 import json
@@ -14,6 +15,7 @@ import shutil
 import tempfile
 import unittest
 
+from codecarbon.emissions_tracker import BaseEmissionsTracker
 from codecarbon.output_methods.base_output import OutputMethod
 from codecarbon.output_methods.emissions_data import EmissionsData, TaskEmissionsData
 from codecarbon.output_methods.sci import (
@@ -193,6 +195,77 @@ class TestSCIOutput(unittest.TestCase):
             report = json.load(f)
         self.assertEqual([t["taskName"] for t in report["tasks"]], ["train", "infer"])
 
+    def test_set_functional_unit_count_updates_existing_unit(self):
+        data = _make_emissions_data()
+        handler = SCIOutput(
+            output_dir=self.temp_dir,
+            functional_unit=FunctionalUnit(name="request", count=1),
+        )
+        handler.set_functional_unit_count(750)
+        handler.out(data, data)
+
+        with open(os.path.join(self.temp_dir, f"sci_report_{data.run_id}.json")) as f:
+            report = json.load(f)
+        self.assertEqual(report["terms"]["R"], 750)
+        # name is kept when not given again
+        self.assertEqual(report["terms"]["R_name"], "request")
+        self.assertAlmostEqual(report["sci"], data.emissions * 1000 / 750, places=10)
+
+    def test_set_functional_unit_count_renames_existing_unit(self):
+        handler = SCIOutput(
+            output_dir=self.temp_dir,
+            functional_unit=FunctionalUnit(name="request", count=1),
+        )
+        handler.set_functional_unit_count(10, name="image")
+        data = _make_emissions_data()
+        handler.out(data, data)
+
+        with open(os.path.join(self.temp_dir, f"sci_report_{data.run_id}.json")) as f:
+            report = json.load(f)
+        self.assertEqual(report["terms"]["R_name"], "image")
+        self.assertEqual(report["unit"], "gCO2eq per image")
+
+    def test_out_logs_and_swallows_errors(self):
+        handler = SCIOutput(output_dir=self.temp_dir)
+        with self.assertLogs("codecarbon", level="ERROR") as logs:
+            handler.out(object(), object())
+        self.assertTrue(any("Failed to write SCI report" in m for m in logs.output))
+        self.assertEqual(os.listdir(self.temp_dir), [])
+
+    def test_task_out_without_tasks_writes_nothing(self):
+        SCIOutput(output_dir=self.temp_dir).task_out([], "experiment")
+        self.assertEqual(os.listdir(self.temp_dir), [])
+
+    def test_task_out_logs_and_swallows_errors(self):
+        handler = SCIOutput(output_dir=self.temp_dir)
+        with self.assertLogs("codecarbon", level="ERROR") as logs:
+            handler.task_out([object()], "experiment")
+        self.assertTrue(
+            any("Failed to write SCI task report" in m for m in logs.output)
+        )
+        self.assertEqual(os.listdir(self.temp_dir), [])
+
+    def test_task_out_computes_sci_per_task(self):
+        tasks = [
+            _make_task_data("train", emissions=0.2, energy_consumed=0.5),
+            _make_task_data("infer", emissions=0.1, energy_consumed=0.5),
+        ]
+        handler = SCIOutput(
+            output_dir=self.temp_dir,
+            functional_unit=FunctionalUnit(name="request", count=100),
+            embodied=EmbodiedDeclaration(gco2e=10.0, source="vendor LCA"),
+        )
+        handler.task_out(tasks, "experiment")
+
+        with open(
+            os.path.join(self.temp_dir, f"sci_report_tasks_{tasks[0].run_id}.json")
+        ) as f:
+            report = json.load(f)
+        self.assertEqual(report["experimentName"], "experiment")
+        self.assertAlmostEqual(report["tasks"][0]["sci"], (0.2 * 1000 + 10.0) / 100)
+        self.assertAlmostEqual(report["tasks"][1]["sci"], (0.1 * 1000 + 10.0) / 100)
+        self.assertEqual(report["tasks"][0]["provenance"]["M_source"], "vendor LCA")
+
     def test_live_out_is_noop(self):
         data = _make_emissions_data()
         SCIOutput(output_dir=self.temp_dir).live_out(data, data)
@@ -239,6 +312,35 @@ class TestContextFile(unittest.TestCase):
         self.assertEqual(report["provenance"]["M_source"], "manufacturer LCA")
         self.assertEqual(report["reporter"], {"organization": "Acme"})
 
+    def test_from_file_empty_context_declares_nothing(self):
+        path = self._write_context("{}")
+        handler = SCIOutput.from_file(path, output_dir=self.temp_dir)
+        data = _make_emissions_data()
+        handler.out(data, data)
+
+        with open(os.path.join(self.temp_dir, f"sci_report_{data.run_id}.json")) as f:
+            report = json.load(f)
+        self.assertIsNone(report["sci"])
+        self.assertIsNone(report["terms"]["R_name"])
+        self.assertEqual(report["terms"]["M_gCO2e"], 0.0)
+        self.assertNotIn("reporter", report)
+
+    def test_from_file_partial_declarations_use_defaults(self):
+        path = self._write_context(
+            json.dumps({"functionalUnit": {"count": 4}, "embodied": {"gCO2e": 8.0}})
+        )
+        handler = SCIOutput.from_file(path, output_dir=self.temp_dir)
+        data = _make_emissions_data()
+        handler.out(data, data)
+
+        with open(os.path.join(self.temp_dir, f"sci_report_{data.run_id}.json")) as f:
+            report = json.load(f)
+        self.assertEqual(report["terms"]["R"], 4)
+        self.assertEqual(report["terms"]["R_name"], "")
+        self.assertEqual(report["unit"], "gCO2eq per functional unit")
+        self.assertEqual(report["provenance"]["M_source"], "not declared")
+        self.assertAlmostEqual(report["sci"], (data.emissions * 1000 + 8.0) / 4)
+
     def test_from_file_missing(self):
         with self.assertRaises(FileNotFoundError):
             SCIOutput.from_file(os.path.join(self.temp_dir, "nope.json"))
@@ -247,6 +349,62 @@ class TestContextFile(unittest.TestCase):
         path = self._write_context("{not json")
         with self.assertRaises(json.JSONDecodeError):
             SCIOutput.from_file(path, output_dir=self.temp_dir)
+
+
+class _TrackerStub:
+    """Minimal stand-in exercising ``_init_output_methods`` without hardware."""
+
+    def __init__(self, output_dir: str, external_conf: dict):
+        self._output_methods = [OutputMethod.SCI]
+        self._emissions_endpoint = None
+        self._external_conf = external_conf
+        self._output_dir = output_dir
+        self._output_handlers = []
+
+    def init(self):
+        BaseEmissionsTracker._init_output_methods(self, api_key=None)
+        return self._output_handlers
+
+
+class TestTrackerRegistration(unittest.TestCase):
+    """E. Tracker registration of OutputMethod.SCI."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_sci_method_adds_handler_without_declarations(self):
+        handlers = _TrackerStub(self.temp_dir, {}).init()
+        sci_handlers = [h for h in handlers if isinstance(h, SCIOutput)]
+        self.assertEqual(len(sci_handlers), 1)
+        self.assertIsNone(sci_handlers[0]._functional_unit)
+        self.assertEqual(sci_handlers[0]._output_dir, self.temp_dir)
+
+    def test_sci_context_file_from_config_is_loaded(self):
+        context_path = os.path.join(self.temp_dir, "sci_context.json")
+        with open(context_path, "w") as f:
+            json.dump(
+                {
+                    "functionalUnit": {"name": "request", "count": 250},
+                    "embodied": {"gCO2e": 12.0, "source": "vendor LCA"},
+                },
+                f,
+            )
+        handlers = _TrackerStub(
+            self.temp_dir, {"sci_context_file": context_path}
+        ).init()
+        handler = next(h for h in handlers if isinstance(h, SCIOutput))
+        self.assertEqual(handler._functional_unit, FunctionalUnit("request", 250))
+        self.assertEqual(handler._embodied, EmbodiedDeclaration(12.0, "vendor LCA"))
+
+    def test_sci_context_file_missing_raises(self):
+        with self.assertRaises(FileNotFoundError):
+            _TrackerStub(
+                self.temp_dir,
+                {"sci_context_file": os.path.join(self.temp_dir, "nope.json")},
+            ).init()
 
 
 if __name__ == "__main__":
