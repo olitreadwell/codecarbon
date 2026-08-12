@@ -442,8 +442,10 @@ class BaseEmissionsTracker(ABC):
         :param api_timeout: Read timeout in seconds for API calls (default: 5).
                             Connect timeout is fixed at 3.05s.
         :param api_retries: Retries after the first failed API attempt (default: 2).
-                            Worst-case time an API call can block a measurement
-                            is about (3.05 + api_timeout) * (api_retries + 1).
+                            An emission POST blocks a measurement for at most
+                            about 3.05 * api_retries + (3.05 + api_timeout),
+                            ~16s with the defaults: only connect failures are
+                            retried on POST, so read timeouts happen once.
         :param output_dir: Directory path to which the experiment details are logged,
                            defaults to current directory.
         :param output_file: Name of the output CSV file, defaults to `emissions.csv`.

@@ -44,23 +44,34 @@ def _measurement_timestamp(carbon_emission: dict) -> str:
         return get_datetime_with_timezone()
 
 
-def _build_session(retries: int, backoff: float) -> requests.Session:
+# Failures where the request plausibly never reached the application, so a
+# retry cannot duplicate work: no upstream was reachable (502/503) or we were
+# told to slow down before being served (429).
+_POST_SAFE_STATUSES = (429, 502, 503)
+# Reads are idempotent, so a retry costs at most a wasted round trip.
+_READ_SAFE_STATUSES = (429, 500, 502, 503, 504)
+
+
+def _build_session(
+    retries: int, backoff: float, statuses, retry_read: bool
+) -> requests.Session:
     """
     A Session so sockets (and the TLS handshake) are reused across calls, with
     retry and exponential backoff on the failures that are worth retrying.
 
-    POST is deliberately in `allowed_methods`, unlike urllib3's default. A
-    duplicate emission row is far less harmful than a lost measurement: this is
-    telemetry, not billing. Do not "fix" this without an idempotency key on the
-    row, server side.
+    :statuses: response codes to retry.
+    :retry_read: whether to retry a read timeout or a truncated response, i.e.
+        a failure that happened *after* the request reached the server.
     """
     retry_kwargs = {
         "total": retries,
         "connect": retries,
-        "read": retries,
+        # False, not 0: urllib3 then re-raises the original ReadTimeout instead
+        # of burning the budget and reporting an exhausted-retries error.
+        "read": retries if retry_read else False,
         "status": retries,
         "backoff_factor": backoff,
-        "status_forcelist": (429, 500, 502, 503, 504),
+        "status_forcelist": statuses,
         "allowed_methods": frozenset({"GET", "POST", "PATCH", "PUT", "DELETE"}),
         "raise_on_status": False,
     }
@@ -108,9 +119,16 @@ class ApiClient:  # (AsyncClient)
         :retries: number of retries after the first attempt.
         :backoff: backoff factor between retries, in seconds (0.5 -> 0.5s, 1s, 2s...).
 
-        Note that `timeout` and `retries` multiply: the worst case wall time of a
-        call is roughly `(connect + read) * (retries + 1)` plus backoff, so raise
-        one only while looking at the other.
+        Note that `timeout` and `retries` multiply, so raise one only while
+        looking at the other. Two different worst cases are worth keeping apart:
+
+        - a *hung* endpoint, which accepts the connection and never answers:
+          `read * (retries + 1)` plus backoff, since only the read times out.
+        - the *full* retry chain, where the connection also has to time out:
+          `(connect + read) * (retries + 1)` plus backoff.
+
+        POSTs do not retry read timeouts (see `_post_session`), so their hung
+        case is a single `connect + read` and the chain above is a GET bound.
         """
         self.url = endpoint_url
         self.experiment_id = experiment_id
@@ -118,7 +136,22 @@ class ApiClient:  # (AsyncClient)
         self.conf = conf
         self.access_token = access_token
         self._timeout = timeout
-        self._session = _build_session(retries, backoff)
+        self._session = _build_session(
+            retries, backoff, _READ_SAFE_STATUSES, retry_read=True
+        )
+        # POSTs create rows. carbonserver has no idempotency key and the
+        # dashboard sums emission rows, so a POST replayed after the server
+        # already committed the insert inflates a user's reported emissions
+        # with nothing to show for it: a dropped row is visible, a duplicated
+        # one is not. This session therefore only retries POSTs that
+        # plausibly never reached the application -- connection errors,
+        # connect timeouts, 429/502/503. Read timeouts, truncated responses,
+        # 500 and 504 are *not* retried: the request landed, and the insert
+        # may well have gone through. Widen this only once the API accepts an
+        # idempotency key.
+        self._post_session = _build_session(
+            retries, backoff, _POST_SAFE_STATUSES, retry_read=False
+        )
         # Run creation is the most expensive write path. When it fails, back off
         # instead of re-attempting on every measurement tick.
         self._create_run_not_before = 0.0
@@ -153,6 +186,7 @@ class ApiClient:  # (AsyncClient)
     def close(self):
         """Release the pooled sockets. Safe to call more than once."""
         self._session.close()
+        self._post_session.close()
 
     def set_access_token(self, token: str):
         """This method sets the access token to be used for the API.
@@ -198,7 +232,7 @@ class ApiClient:  # (AsyncClient)
             return organization
         else:
             return self._request(
-                self._session.post, url, payload=payload, expected_status=201
+                self._post_session.post, url, payload=payload, expected_status=201
             ).json()
 
     def get_organization(self, organization_id):
@@ -230,7 +264,7 @@ class ApiClient:  # (AsyncClient)
         payload = dataclasses.asdict(project)
         url = self.url + "/projects"
         return self._request(
-            self._session.post, url, payload=payload, expected_status=201
+            self._post_session.post, url, payload=payload, expected_status=201
         ).json()
 
     def get_project(self, project_id):
@@ -279,7 +313,9 @@ class ApiClient:  # (AsyncClient)
         try:
             payload = dataclasses.asdict(emission)
             url = self.url + "/emissions"
-            self._request(self._session.post, url, payload=payload, expected_status=201)
+            self._request(
+                self._post_session.post, url, payload=payload, expected_status=201
+            )
             logger.debug(f"ApiClient - Successful upload emission {payload} to {url}")
         except requests.exceptions.HTTPError:
             # Already logged by _raise_api_error, do not log it twice.
@@ -355,7 +391,7 @@ class ApiClient:  # (AsyncClient)
             payload = dataclasses.asdict(run)
             url = self.url + "/runs"
             r = self._request(
-                self._session.post, url, payload=payload, expected_status=201
+                self._post_session.post, url, payload=payload, expected_status=201
             )
             self.run_id = r.json()["id"]
             logger.info(
@@ -398,7 +434,7 @@ class ApiClient:  # (AsyncClient)
         payload = dataclasses.asdict(experiment)
         url = self.url + "/experiments"
         return self._request(
-            self._session.post, url, payload=payload, expected_status=201
+            self._post_session.post, url, payload=payload, expected_status=201
         ).json()
 
     def get_experiment(self, experiment_id):

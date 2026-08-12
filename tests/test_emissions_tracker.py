@@ -425,6 +425,37 @@ class TestCarbonTracker(unittest.TestCase):
             )
         )
 
+    def test_api_timeout_and_retries_reach_the_api_client(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        """The knobs are public config, so prove they survive the whole path."""
+        tracker = EmissionsTracker(
+            output_dir=self.temp_path,
+            output_handlers=[],
+            output_methods=[OutputMethod.API],
+            experiment_id="exp-1",
+            api_key="key",
+            api_timeout=7,
+            api_retries=4,
+        )
+
+        api_output = next(
+            handler
+            for handler in tracker._output_handlers
+            if isinstance(handler, CodeCarbonAPIOutput)
+        )
+        self.assertEqual(api_output.api._timeout, (3.05, 7))
+        for session in (api_output.api._session, api_output.api._post_session):
+            retry = session.get_adapter("http://x").max_retries
+            self.assertEqual(retry.total, 4)
+
     def test_output_methods_parsed_from_config_string(
         self,
         mock_cli_setup,

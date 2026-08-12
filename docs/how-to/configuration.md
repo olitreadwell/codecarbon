@@ -178,6 +178,41 @@ Despite its name, this option applies to every counter-based CPU interface:
 It has no effect when CodeCarbon falls back to TDP/CPU-load estimation, since
 that mode models the CPU package only.
 
+## API timeouts and retries
+
+When `save_to_api` is enabled, each measurement is sent to the API from the
+scheduler thread, so a slow or unreachable API delays the next measurement. Two
+parameters bound how long that can take:
+
+- **`api_timeout`** (default: `5`): read timeout in seconds. The connect
+  timeout is fixed at 3.05s.
+- **`api_retries`** (default: `2`): retries after the first failed attempt.
+
+``` ini
+[codecarbon]
+api_timeout = 5
+api_retries = 2
+```
+
+Or in code:
+
+``` python
+EmissionsTracker(api_timeout=5, api_retries=2)
+```
+
+With the defaults, an emission upload blocks for at most ~16 seconds, which
+stays under CodeCarbon's own 45s stale-measurement warning. Raise one only
+while looking at the other: they multiply.
+
+!!! note "What gets retried"
+
+    Reads (`GET`) retry any transient failure. Emission uploads (`POST`) only
+    retry failures where the request plausibly never reached the API —
+    connection errors, connect timeouts, and `429`/`502`/`503`. A read timeout
+    or a `504` is **not** retried, because the API may already have stored the
+    row and the dashboard sums emission rows: a duplicated measurement would
+    silently inflate your reported emissions.
+
 ## Access internet through proxy server
 
 If you need a proxy to access internet, which is needed to call a Web

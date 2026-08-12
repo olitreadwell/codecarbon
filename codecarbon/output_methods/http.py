@@ -53,8 +53,21 @@ class CodeCarbonAPIOutput(BaseOutput):
         """
         The timeout and retry budget here is deliberately tighter than
         ApiClient's own default: this send runs inline on the scheduler thread,
-        so a slow failure delays the next measurement. Worst case is roughly
-        (3.05 + 5) * 3 plus backoff.
+        so a slow failure delays the next measurement.
+
+        With the defaults below, measured against a loopback stub:
+
+        - hung endpoint (connects, never answers): ~5s. POSTs do not retry
+          read timeouts, see ApiClient._post_session, so this is one read
+          timeout and not three.
+        - unreachable endpoint (every connect times out): ~11s, i.e.
+          3.05 * 3 plus jittered backoff.
+        - worst case, connect timeouts until the last attempt connects and
+          then hangs: ~16s.
+
+        All under the tracker's own 45s stale-measurement warning at
+        emissions_tracker.py, which is the number that actually matters: this
+        call blocks the scheduler thread.
         """
         self.endpoint_url: str = endpoint_url
         self.api = ApiClient(

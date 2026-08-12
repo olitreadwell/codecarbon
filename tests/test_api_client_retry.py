@@ -9,6 +9,7 @@ No traffic leaves the machine.
 
 import socket
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -58,6 +59,10 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0) or 0)
         if length:
             self.rfile.read(length)
+        if state["hang"]:
+            # Answer far too late, i.e. the client hits its read timeout while
+            # the server is happily processing the request.
+            time.sleep(state["hang"])
         plan = state["status_plan"]
         code = plan.pop(0) if plan else state["success_status"]
         body = b'{"id": "run-1"}'
@@ -93,6 +98,7 @@ class StubServerTestCase(unittest.TestCase):
             "connections": 0,
             "status_plan": [],
             "success_status": 201,
+            "hang": 0,
         }
         self.server = _Server(self.state)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -162,6 +168,49 @@ class TestRetry(StubServerTestCase):
             api.add_emission(dict(EMISSION))
         # urllib3 reports the exhausted budget in the message.
         self.assertIn("max retries exceeded", str(ctx.exception).lower())
+
+
+class TestPostIsNotReplayedAfterTheRequestLanded(StubServerTestCase):
+    """
+    carbonserver has no idempotency key and the dashboard sums emission rows,
+    so replaying a POST whose response was lost silently inflates a user's
+    reported emissions. Only failures that plausibly never reached the
+    application may be retried on POST.
+    """
+
+    def test_read_timeout_on_post_is_not_retried(self):
+        self.state["hang"] = 3  # much longer than the read timeout below
+        api = self.client(timeout=(3.05, 0.3))
+
+        with self.assertRaises(requests.exceptions.ReadTimeout):
+            api.add_emission(dict(EMISSION))
+        self.assertEqual(self.state["requests"], 1)
+
+    def test_503_on_post_is_still_retried(self):
+        """The counterpart: 503 means no upstream took the request."""
+        self.state["status_plan"] = [503, 503]
+        api = self.client(timeout=(3.05, 0.3))
+
+        self.assertTrue(api.add_emission(dict(EMISSION)))
+        self.assertEqual(self.state["requests"], 3)
+
+    def test_504_on_post_is_not_retried(self):
+        """A gateway timeout means the app was reached and may have committed."""
+        self.state["status_plan"] = [504] * 10
+        api = self.client()
+
+        with self.assertRaises(requests.exceptions.HTTPError):
+            api.add_emission(dict(EMISSION))
+        self.assertEqual(self.state["requests"], 1)
+
+    def test_read_timeout_on_get_is_still_retried(self):
+        """GETs are idempotent, so they keep the broader policy."""
+        self.state["hang"] = 3
+        api = self.client(timeout=(3.05, 0.3))
+
+        with self.assertRaises(requests.exceptions.RequestException):
+            api.get_list_organizations()
+        self.assertEqual(self.state["requests"], 3)
 
 
 class TestSessionReuse(StubServerTestCase):
