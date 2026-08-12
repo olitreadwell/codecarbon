@@ -174,6 +174,42 @@ class TestCPULoad(unittest.TestCase):
 
     @mock.patch(
         "codecarbon.external.hardware.CPU._get_power_from_cpus",
+        return_value=Power.from_watts(1),
+    )
+    def test_cpu_total_power_keeps_samples_added_while_draining(
+        self,
+        mocked_get_power_from_cpus,
+        mocked_is_psutil_available,
+        mocked_is_powergadget_available,
+        mocked_is_rapl_available,
+    ):
+        """A sample appended by the monitor thread while total_power drains the
+        history must not be lost (see issue #1315)."""
+        cpu = CPU.from_utils(
+            None, MODE_CPU_LOAD, "Intel(R) Core(TM) i7-7600U CPU @ 2.80GHz", 100
+        )
+
+        class InjectingHistory(list):
+            """Simulates the monitor thread firing while the history is read."""
+
+            injected = False
+
+            def __iter__(inner):
+                items = list.__iter__(inner)
+                for item in items:
+                    yield item
+                if not inner.injected:
+                    inner.injected = True
+                    cpu.monitor_power()
+
+        cpu._power_history = InjectingHistory([Power.from_watts(1)])
+
+        cpu.total_power()
+
+        self.assertEqual(len(cpu._power_history), 1)
+
+    @mock.patch(
+        "codecarbon.external.hardware.CPU._get_power_from_cpus",
         return_value=Power.from_watts(30),
     )
     def test_cpu_total_power_averages_buffered_and_latest_sample(
