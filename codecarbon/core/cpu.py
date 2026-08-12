@@ -770,8 +770,11 @@ class IntelRAPL:
             domain_name,
         ) in domain_map.values():
             try:
-                if domain_name and (
-                    "package" in domain_name.lower() or "psys" in domain_name.lower()
+                domain_lower = (domain_name or "").lower()
+                # DRAM domains only reach this point when rapl_include_dram is True,
+                # so they need an aggregated name to be counted in the reported total.
+                if any(
+                    keyword in domain_lower for keyword in ("package", "psys", "dram")
                 ):
                     display_name = f"Processor Energy Delta_{domain_index}(kWh)"
                     domain_index += 1

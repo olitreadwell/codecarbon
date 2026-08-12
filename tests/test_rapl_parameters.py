@@ -3,11 +3,13 @@ Test to verify that rapl_include_dram and rapl_prefer_psys parameters work corre
 """
 
 import logging
+import re
 import sys
 
 import pytest
 
 from codecarbon.core.cpu import IntelRAPL
+from codecarbon.core.units import Time
 
 
 @pytest.mark.skipif(not sys.platform.lower().startswith("lin"), reason="requires Linux")
@@ -112,8 +114,50 @@ def test_rapl_include_dram_true_explicit(tmp_path):
 
     # Verify both package and dram are present
     names = [f.name for f in rapl._rapl_files]
-    assert any("Processor Energy" in name for name in names), "Missing package domain"
-    assert any("dram" in name.lower() for name in names), "Missing DRAM domain"
+    # Both domains must be named so that they are summed in the reported energy
+    assert (
+        len([name for name in names if "Processor Energy" in name]) == 2
+    ), f"Expected package and DRAM to both be aggregated, got {names}"
+
+
+@pytest.mark.skipif(not sys.platform.lower().startswith("lin"), reason="requires Linux")
+@pytest.mark.parametrize("include_dram, expected_uj", [(False, 100000), (True, 125000)])
+def test_rapl_include_dram_energy_is_aggregated(tmp_path, include_dram, expected_uj):
+    """
+    Verify that DRAM energy actually contributes to the total reported by
+    get_cpu_details() when rapl_include_dram=True.
+    """
+    base = tmp_path
+    rapl_provider = base / "intel-rapl"
+    rapl_provider.mkdir()
+
+    d_package = rapl_provider / "intel-rapl:0"
+    d_package.mkdir()
+    (d_package / "name").write_text("package-0")
+    (d_package / "energy_uj").write_text("1000000")
+    (d_package / "max_energy_range_uj").write_text("262143328850")
+
+    d_dram = rapl_provider / "intel-rapl:1"
+    d_dram.mkdir()
+    (d_dram / "name").write_text("dram")
+    (d_dram / "energy_uj").write_text("500000")
+    (d_dram / "max_energy_range_uj").write_text("262143328850")
+
+    rapl = IntelRAPL(rapl_dir=str(base), rapl_include_dram=include_dram)
+
+    # Simulate one second of consumption
+    (d_package / "energy_uj").write_text(str(1000000 + 100000))
+    (d_dram / "energy_uj").write_text(str(500000 + 25000))
+
+    details = rapl.get_cpu_details(Time.from_seconds(1))
+
+    energy = sum(
+        value
+        for metric, value in details.items()
+        if re.match(r"^Processor Energy Delta_\d", metric)
+    )
+    # micro joules -> kWh
+    assert energy == pytest.approx(expected_uj / (1000 * 3600 * 1e6))
 
 
 @pytest.mark.skipif(not sys.platform.lower().startswith("lin"), reason="requires Linux")
