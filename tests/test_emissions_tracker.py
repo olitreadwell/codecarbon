@@ -356,6 +356,54 @@ class TestCarbonTracker(unittest.TestCase):
             )
         )
 
+    def test_run_id_with_api_output_is_never_none(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        with (
+            mock.patch(
+                "codecarbon.output_methods.http.ApiClient._create_run"
+            ) as mock_create_run,
+            mock.patch("codecarbon.output_methods.http.ApiClient.add_emission"),
+        ):
+            tracker = EmissionsTracker(
+                output_dir=self.temp_path,
+                output_handlers=[],
+                output_methods=[OutputMethod.CSV, OutputMethod.API],
+                experiment_id="test-experiment-id",
+                api_key="test-api-key",
+            )
+            api_output = next(
+                handler
+                for handler in tracker._output_handlers
+                if isinstance(handler, CodeCarbonAPIOutput)
+            )
+
+            def create_run(experiment_id):
+                api_output.api.run_id = "run-created"
+                return "run-created"
+
+            mock_create_run.side_effect = create_run
+
+            # Before the run is created, the tracker falls back on a local uuid.
+            self.assertIsNotNone(tracker.run_id)
+
+            tracker.start()
+            heavy_computation(1)
+            tracker.stop()
+
+        # Once the API created the run, the tracker exposes the API run id...
+        self.assertEqual(tracker.run_id, "run-created")
+        # ...and it is what got persisted, instead of the string "None".
+        emissions_df = pd.read_csv(self.emissions_file_path)
+        self.assertEqual(emissions_df["run_id"].iloc[0], "run-created")
+
     def test_default_output_methods_is_csv(
         self,
         mock_cli_setup,
