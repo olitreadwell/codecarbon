@@ -46,7 +46,16 @@ class CodeCarbonAPIOutput(BaseOutput):
         experiment_id: str,
         api_key: str,
         conf,
+        timeout=(3.05, 5),
+        retries: int = 2,
+        backoff: float = 0.5,
     ):
+        """
+        The timeout and retry budget here is deliberately tighter than
+        ApiClient's own default: this send runs inline on the scheduler thread,
+        so a slow failure delays the next measurement. Worst case is roughly
+        (3.05 + 5) * 3 plus backoff.
+        """
         self.endpoint_url: str = endpoint_url
         self.api = ApiClient(
             endpoint_url=endpoint_url,
@@ -54,8 +63,16 @@ class CodeCarbonAPIOutput(BaseOutput):
             api_key=api_key,
             conf=conf,
             create_run_automatically=False,
+            timeout=timeout,
+            retries=retries,
+            backoff=backoff,
         )
         self.run_id = self.api.run_id
+
+    def exit(self) -> None:
+        # A Session holds sockets; long-lived processes creating many trackers
+        # would otherwise leak file descriptors.
+        self.api.close()
 
     def _ensure_api_run(self) -> None:
         if self.api.run_id is None and self.api.experiment_id is not None:

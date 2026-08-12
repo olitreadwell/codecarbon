@@ -1,16 +1,16 @@
 """
 
 Based on https://kernelpanic.io/the-modern-way-to-call-apis-in-python
-
-TODO : use async call to API
 """
 
-# from httpx import AsyncClient
 import dataclasses
 import json
+import time
 from datetime import datetime, timedelta, tzinfo
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from codecarbon.core.schemas import (
     EmissionCreate,
@@ -44,6 +44,40 @@ def _measurement_timestamp(carbon_emission: dict) -> str:
         return get_datetime_with_timezone()
 
 
+def _build_session(retries: int, backoff: float) -> requests.Session:
+    """
+    A Session so sockets (and the TLS handshake) are reused across calls, with
+    retry and exponential backoff on the failures that are worth retrying.
+
+    POST is deliberately in `allowed_methods`, unlike urllib3's default. A
+    duplicate emission row is far less harmful than a lost measurement: this is
+    telemetry, not billing. Do not "fix" this without an idempotency key on the
+    row, server side.
+    """
+    retry_kwargs = {
+        "total": retries,
+        "connect": retries,
+        "read": retries,
+        "status": retries,
+        "backoff_factor": backoff,
+        "status_forcelist": (429, 500, 502, 503, 504),
+        "allowed_methods": frozenset({"GET", "POST", "PATCH", "PUT", "DELETE"}),
+        "raise_on_status": False,
+    }
+    try:
+        # Spreads the retry storm when a whole fleet reconnects after an outage.
+        retry = Retry(backoff_jitter=1.0, **retry_kwargs)
+    except TypeError:
+        # urllib3 < 2.0 has no backoff_jitter. We are a library in other
+        # people's environments, so degrade instead of pinning urllib3.
+        retry = Retry(**retry_kwargs)
+    adapter = HTTPAdapter(max_retries=retry, pool_maxsize=4)
+    session = requests.Session()
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
 class ApiClient:  # (AsyncClient)
     """
     This class call the Code Carbon API
@@ -59,6 +93,9 @@ class ApiClient:  # (AsyncClient)
         access_token=None,
         conf=None,
         create_run_automatically=True,
+        timeout=(3.05, 10),
+        retries=2,
+        backoff=0.5,
     ):
         """
         :endpoint_url: URL of the API endpoint
@@ -67,13 +104,25 @@ class ApiClient:  # (AsyncClient)
         :access_token: Code Carbon API access token
         :conf: Metadata of the experiment
         :create_run_automatically: If False, do not create a run. To use API in read only mode.
+        :timeout: requests timeout, either seconds or a (connect, read) tuple.
+        :retries: number of retries after the first attempt.
+        :backoff: backoff factor between retries, in seconds (0.5 -> 0.5s, 1s, 2s...).
+
+        Note that `timeout` and `retries` multiply: the worst case wall time of a
+        call is roughly `(connect + read) * (retries + 1)` plus backoff, so raise
+        one only while looking at the other.
         """
-        # super().__init__(base_url=endpoint_url) # (AsyncClient)
         self.url = endpoint_url
         self.experiment_id = experiment_id
         self.api_key = api_key
         self.conf = conf
         self.access_token = access_token
+        self._timeout = timeout
+        self._session = _build_session(retries, backoff)
+        # Run creation is the most expensive write path. When it fails, back off
+        # instead of re-attempting on every measurement tick.
+        self._create_run_not_before = 0.0
+        self._create_run_backoff = 0.0
         if self.experiment_id is not None and create_run_automatically:
             self._create_run(self.experiment_id)
 
@@ -96,10 +145,14 @@ class ApiClient:  # (AsyncClient)
         :expected_status: the http code the API returns when the call succeeds
         """
         headers = self._get_headers()
-        response = method(url=url, json=payload, timeout=2, headers=headers)
+        response = method(url=url, json=payload, timeout=self._timeout, headers=headers)
         if response.status_code != expected_status:
             self._raise_api_error(url, payload or {}, response)
         return response
+
+    def close(self):
+        """Release the pooled sockets. Safe to call more than once."""
+        self._session.close()
 
     def set_access_token(self, token: str):
         """This method sets the access token to be used for the API.
@@ -113,14 +166,14 @@ class ApiClient:  # (AsyncClient)
         Check API access to user account
         """
         url = self.url + "/auth/check"
-        return self._request(requests.get, url).json()
+        return self._request(self._session.get, url).json()
 
     def get_list_organizations(self):
         """
         List all organizations
         """
         url = self.url + "/organizations"
-        return self._request(requests.get, url).json()
+        return self._request(self._session.get, url).json()
 
     def check_organization_exists(self, organization_name: str):
         """
@@ -145,7 +198,7 @@ class ApiClient:  # (AsyncClient)
             return organization
         else:
             return self._request(
-                requests.post, url, payload=payload, expected_status=201
+                self._session.post, url, payload=payload, expected_status=201
             ).json()
 
     def get_organization(self, organization_id):
@@ -153,7 +206,7 @@ class ApiClient:  # (AsyncClient)
         Get an organization
         """
         url = self.url + "/organizations/" + organization_id
-        return self._request(requests.get, url).json()
+        return self._request(self._session.get, url).json()
 
     def update_organization(self, organization: OrganizationCreate):
         """
@@ -161,14 +214,14 @@ class ApiClient:  # (AsyncClient)
         """
         payload = dataclasses.asdict(organization)
         url = self.url + "/organizations/" + organization.id
-        return self._request(requests.patch, url, payload=payload).json()
+        return self._request(self._session.patch, url, payload=payload).json()
 
     def list_projects_from_organization(self, organization_id):
         """
         List all projects
         """
         url = self.url + "/organizations/" + organization_id + "/projects"
-        return self._request(requests.get, url).json()
+        return self._request(self._session.get, url).json()
 
     def create_project(self, project: ProjectCreate):
         """
@@ -177,7 +230,7 @@ class ApiClient:  # (AsyncClient)
         payload = dataclasses.asdict(project)
         url = self.url + "/projects"
         return self._request(
-            requests.post, url, payload=payload, expected_status=201
+            self._session.post, url, payload=payload, expected_status=201
         ).json()
 
     def get_project(self, project_id):
@@ -185,7 +238,7 @@ class ApiClient:  # (AsyncClient)
         Get a project
         """
         url = self.url + "/projects/" + project_id
-        return self._request(requests.get, url).json()
+        return self._request(self._session.get, url).json()
 
     def add_emission(self, carbon_emission: dict):
         assert self.experiment_id is not None
@@ -226,7 +279,7 @@ class ApiClient:  # (AsyncClient)
         try:
             payload = dataclasses.asdict(emission)
             url = self.url + "/emissions"
-            self._request(requests.post, url, payload=payload, expected_status=201)
+            self._request(self._session.post, url, payload=payload, expected_status=201)
             logger.debug(f"ApiClient - Successful upload emission {payload} to {url}")
         except requests.exceptions.HTTPError:
             # Already logged by _raise_api_error, do not log it twice.
@@ -236,7 +289,39 @@ class ApiClient:  # (AsyncClient)
             raise
         return True
 
+    # Bounds on the run-creation retry delay, in seconds.
+    _CREATE_RUN_BACKOFF_MIN = 30.0
+    _CREATE_RUN_BACKOFF_MAX = 900.0
+
     def _create_run(self, experiment_id: str):
+        """
+        Create a run, backing off after a failure.
+
+        Without the backoff every client in a fleet re-attempts run creation on
+        every measurement tick for as long as the API is down, which hammers the
+        most expensive write path exactly when it is least able to take it.
+        Returns None without calling the API while the backoff is in effect.
+        """
+        if time.monotonic() < self._create_run_not_before:
+            logger.debug(
+                "ApiClient run creation is backing off after a previous failure, "
+                "skipping this attempt."
+            )
+            return None
+        try:
+            run_id = self._create_run_once(experiment_id)
+        except Exception:
+            self._create_run_backoff = min(
+                max(self._create_run_backoff * 2, self._CREATE_RUN_BACKOFF_MIN),
+                self._CREATE_RUN_BACKOFF_MAX,
+            )
+            self._create_run_not_before = time.monotonic() + self._create_run_backoff
+            raise
+        self._create_run_backoff = 0.0
+        self._create_run_not_before = 0.0
+        return run_id
+
+    def _create_run_once(self, experiment_id: str):
         """
         Create the experiment for project_id
         """
@@ -269,7 +354,9 @@ class ApiClient:  # (AsyncClient)
             )
             payload = dataclasses.asdict(run)
             url = self.url + "/runs"
-            r = self._request(requests.post, url, payload=payload, expected_status=201)
+            r = self._request(
+                self._session.post, url, payload=payload, expected_status=201
+            )
             self.run_id = r.json()["id"]
             logger.info(
                 "ApiClient Successfully registered your run on the API.\n\n"
@@ -295,7 +382,7 @@ class ApiClient:  # (AsyncClient)
         List all experiments for a project
         """
         url = self.url + "/projects/" + project_id + "/experiments"
-        return self._request(requests.get, url).json()
+        return self._request(self._session.get, url).json()
 
     def set_experiment(self, experiment_id: str):
         """
@@ -311,7 +398,7 @@ class ApiClient:  # (AsyncClient)
         payload = dataclasses.asdict(experiment)
         url = self.url + "/experiments"
         return self._request(
-            requests.post, url, payload=payload, expected_status=201
+            self._session.post, url, payload=payload, expected_status=201
         ).json()
 
     def get_experiment(self, experiment_id):
@@ -319,7 +406,7 @@ class ApiClient:  # (AsyncClient)
         Get an experiment by id
         """
         url = self.url + "/experiments/" + experiment_id
-        return self._request(requests.get, url).json()
+        return self._request(self._session.get, url).json()
 
     def _raise_api_error(self, url, payload, response):
         """

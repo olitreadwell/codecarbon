@@ -392,6 +392,8 @@ class BaseEmissionsTracker(ABC):
         api_call_interval: Optional[int] = _sentinel,
         api_endpoint: Optional[str] = _sentinel,
         api_key: Optional[str] = _sentinel,
+        api_timeout: Optional[float] = _sentinel,
+        api_retries: Optional[int] = _sentinel,
         output_dir: Optional[str] = _sentinel,
         output_file: Optional[str] = _sentinel,
         output_methods: Optional[List[OutputMethod]] = _sentinel,
@@ -437,6 +439,11 @@ class BaseEmissionsTracker(ABC):
         :param api_endpoint: Optional URL of Code Carbon API endpoint for sending
                              emissions data.
         :param api_key: API key for Code Carbon API (mandatory!).
+        :param api_timeout: Read timeout in seconds for API calls (default: 5).
+                            Connect timeout is fixed at 3.05s.
+        :param api_retries: Retries after the first failed API attempt (default: 2).
+                            Worst-case time an API call can block a measurement
+                            is about (3.05 + api_timeout) * (api_retries + 1).
         :param output_dir: Directory path to which the experiment details are logged,
                            defaults to current directory.
         :param output_file: Name of the output CSV file, defaults to `emissions.csv`.
@@ -554,6 +561,8 @@ class BaseEmissionsTracker(ABC):
         self._set_from_conf(api_call_interval, "api_call_interval", 8, int)
         self._set_from_conf(api_endpoint, "api_endpoint", "https://api.codecarbon.io")
         self._set_from_conf(api_key, "api_key", "api_key")
+        self._set_from_conf(api_timeout, "api_timeout", 5, float)
+        self._set_from_conf(api_retries, "api_retries", 2, int)
         self._configure_electricitymaps_token(
             electricitymaps_api_token, co2_signal_api_token
         )
@@ -644,6 +653,8 @@ class BaseEmissionsTracker(ABC):
                 experiment_id=self._experiment_id,
                 api_key=api_key,
                 conf=self._conf,
+                timeout=(3.05, self._api_timeout),
+                retries=self._api_retries,
             )
             self.run_id = cc_api__out.run_id
             self._output_handlers.append(cc_api__out)
