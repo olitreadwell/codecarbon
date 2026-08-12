@@ -3,10 +3,10 @@
 import os
 import subprocess
 import sys
-from typing import Annotated
 
 import typer
 from rich import print
+from typing_extensions import Annotated
 
 
 def run_and_monitor(
