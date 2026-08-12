@@ -76,6 +76,39 @@ class TestPeriodicScheduler(unittest.TestCase):
         self.assertGreater(len(calls), stopped_at, "restart did not resume ticking")
         self.assertFalse(second.is_alive())
 
+    def test_start_after_a_timed_out_stop_does_not_run_two_loops(self):
+        """A wedged callback must not be released back into its loop.
+
+        `stop()` gives up after a bounded join. If it forgot the thread anyway,
+        the next `start()` would clear `_stop_event` and the still-blocked
+        thread would resume ticking alongside the freshly started one.
+        """
+        release = threading.Event()
+        idents = set()
+        blocked_once = threading.Event()
+
+        def wedged():
+            idents.add(threading.get_ident())
+            if not blocked_once.is_set():
+                blocked_once.set()
+                release.wait(5)
+
+        scheduler = PeriodicScheduler(INTERVAL, wedged)
+        scheduler.start()
+        first = scheduler._thread
+        self.assertTrue(blocked_once.wait(2), "callback never ran")
+
+        scheduler.stop()  # join times out, callback still blocked
+        self.assertTrue(first.is_alive())
+
+        scheduler.start()  # must not arm a second loop
+        release.set()
+        time.sleep(INTERVAL * 6)
+        scheduler.stop()
+
+        self.assertEqual(len(idents), 1, f"two scheduler loops ran: {idents}")
+        self.assertFalse(first.is_alive())
+
     def test_exception_does_not_kill_the_loop(self):
         calls = []
 

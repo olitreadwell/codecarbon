@@ -68,9 +68,18 @@ class PeriodicScheduler:
         default so a wedged measurement cannot hang the caller for long.
         """
         self._stop_event.set()
-        thread, self._thread = self._thread, None
+        thread = self._thread
         if thread is not None and thread is not current_thread():
             # ponytail: 5s cap is a guess at "a measurement should never take
             # longer than this"; make it configurable if a slow hardware
             # backend ever needs more.
             thread.join(min(self.interval, 5.0) if timeout is None else timeout)
+            if thread.is_alive():
+                logger.warning(
+                    "Scheduled measurement did not return in time; the "
+                    "scheduler thread is still running and will exit on its "
+                    "own. A new start() is ignored until then."
+                )
+        # `_thread` is deliberately kept: `_stopped` tests `is_alive()`, so a
+        # still-running thread keeps `start()` a no-op instead of letting it
+        # clear `_stop_event` and release the old loop alongside a new one.
