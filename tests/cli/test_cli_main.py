@@ -8,6 +8,7 @@ import typer
 from typer.testing import CliRunner
 
 from codecarbon.cli import main as cli_main
+from codecarbon.output_methods.base_output import OutputMethod
 
 
 class FakeApiClient:
@@ -422,7 +423,7 @@ def test_monitor_delegates_online_mode_to_run_and_monitor(monkeypatch):
     result = cli_main.monitor(ctx=ctx, api=True)
     assert result == "ok"
     assert captured["offline"] is False
-    assert captured["kwargs"]["save_to_api"] is True
+    assert captured["kwargs"]["output_methods"] == [OutputMethod.CSV, OutputMethod.API]
 
 
 def test_monitor_delegates_to_run_and_monitor_with_extra_args(monkeypatch):
@@ -440,7 +441,7 @@ def test_monitor_delegates_to_run_and_monitor_with_extra_args(monkeypatch):
     result = cli_main.monitor(ctx=ctx, api=False)
     assert result == "ok"
     assert captured["args"] == ["python", "train.py"]
-    assert captured["kwargs"]["save_to_api"] is False
+    assert "output_methods" not in captured["kwargs"]
 
 
 def test_monitor_no_api_skips_experiment_id_requirement(monkeypatch):
@@ -458,7 +459,7 @@ def test_monitor_no_api_skips_experiment_id_requirement(monkeypatch):
     result = cli_main.monitor(ctx=ctx, api=False)
     assert result == "ok"
     assert captured["offline"] is False
-    assert captured["kwargs"]["save_to_api"] is False
+    assert "output_methods" not in captured["kwargs"]
 
 
 def test_monitor_passes_log_level_to_run_and_monitor(monkeypatch):

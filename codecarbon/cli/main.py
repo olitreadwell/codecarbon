@@ -422,7 +422,13 @@ def monitor(
             )
             raise typer.Exit(1)
 
-        tracker_args = {**tracker_args, "save_to_api": api}
+        if api:
+            from codecarbon.output_methods.base_output import OutputMethod
+
+            tracker_args = {
+                **tracker_args,
+                "output_methods": [OutputMethod.CSV, OutputMethod.API],
+            }
 
     from codecarbon.emissions_tracker import EmissionsTracker, OfflineEmissionsTracker
 
@@ -473,7 +479,7 @@ def detect():
     from codecarbon.emissions_tracker import EmissionsTracker
 
     print("Detecting hardware...")
-    tracker = EmissionsTracker(save_to_file=False)
+    tracker = EmissionsTracker(output_methods=[])
     hardware_info = tracker.get_detected_hardware()
 
     print("\nDetected Hardware and System Information:")

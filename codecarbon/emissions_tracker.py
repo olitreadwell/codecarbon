@@ -5,10 +5,12 @@ OfflineEmissionsTracker, context manager and decorator @track_emissions
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import os
 import platform
 import re
+import sys
 import time
 import uuid
 import warnings
@@ -54,6 +56,31 @@ if TYPE_CHECKING:
 #      python-distinguish-default-argument-and-argument-provided-with-default-value
 
 _sentinel = object()
+
+_PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+# `contextlib` shows up in the stack because of the `@suppress(...)` decorator
+_INTERNAL_FILE = os.path.abspath(contextlib.__file__)
+
+
+def _caller_stacklevel() -> int:
+    """
+    Stack level of the first frame outside of the codecarbon package.
+
+    Deprecation warnings are raised deep inside the tracker initialization, and the
+    number of intermediate frames depends on the entry point (``EmissionsTracker``,
+    ``OfflineEmissionsTracker``, the ``@track_emissions`` decorator, ...). Counting
+    frames dynamically attributes the warning to the user code that triggered it, so
+    that Python's default ``DeprecationWarning`` filter does not hide it.
+    """
+    frame = sys._getframe(1)
+    level = 1
+    while frame is not None:
+        filename = os.path.abspath(frame.f_code.co_filename)
+        if not filename.startswith(_PACKAGE_DIR) and filename != _INTERNAL_FILE:
+            return level
+        frame = frame.f_back
+        level += 1
+    return 2
 
 
 class BaseEmissionsTracker(ABC):
@@ -224,7 +251,7 @@ class BaseEmissionsTracker(ABC):
                 "The save_to_* parameters are deprecated and will be removed in a "
                 "future version. Use output_methods=[OutputMethod.CSV, ...] instead.",
                 DeprecationWarning,
-                stacklevel=2,
+                stacklevel=_caller_stacklevel(),
             )
 
         self._set_from_conf(output_methods, "output_methods")

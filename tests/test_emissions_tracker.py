@@ -4,6 +4,7 @@ import sys
 import tempfile
 import time
 import unittest
+import warnings
 from pathlib import Path
 from unittest import mock
 
@@ -1108,3 +1109,21 @@ class TestCarbonTracker(unittest.TestCase):
 
         # Verification: If it wasn't cumulative, it would be 3.0 kWh * 300 g/kWh = 0.9 kg
         self.assertLess(data3.emissions, 0.8)
+
+
+def test_deprecation_warning_points_at_caller():
+    """The save_to_* deprecation must be attributed to the calling code, not to
+    codecarbon internals: otherwise Python's default filter silently drops it."""
+    for tracker_cls, extra in (
+        (EmissionsTracker, {}),
+        (OfflineEmissionsTracker, {"country_iso_code": "FRA"}),
+    ):
+        with warnings.catch_warnings(record=True) as recorded:
+            warnings.simplefilter("always")
+            tracker_cls(save_to_file=False, **extra)
+
+        deprecations = [
+            w for w in recorded if issubclass(w.category, DeprecationWarning)
+        ]
+        assert deprecations, f"no DeprecationWarning raised by {tracker_cls.__name__}"
+        assert deprecations[0].filename == __file__

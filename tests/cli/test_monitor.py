@@ -178,3 +178,29 @@ def test_run_and_monitor_handles_keyboard_interrupt(monkeypatch):
     assert exc_info.value.exit_code == 130
     assert process_info["terminated"] == 1
     assert process_info["killed"] == 1
+
+
+def test_run_and_monitor_does_not_pass_deprecated_flags(monkeypatch):
+    """The CLI must not trigger codecarbon's own save_to_* deprecation."""
+    captured = {}
+
+    class CapturingTracker(FakeTracker):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            captured.update(kwargs)
+
+    class FakePopen:
+        def __init__(self, command, text=True):
+            pass
+
+        def wait(self):
+            return 0
+
+    _patch_trackers(monkeypatch, online_cls=CapturingTracker)
+    monkeypatch.setattr(monitor_module.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(monitor_module, "print", lambda *args, **kwargs: None)
+
+    with pytest.raises(typer.Exit):
+        monitor_module.run_and_monitor(SimpleNamespace(args=["--", "echo", "hi"]))
+
+    assert [key for key in captured if key.startswith("save_to_")] == []
