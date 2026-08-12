@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional
 
 import requests
@@ -51,21 +52,36 @@ def get_env_cloud_details(timeout: int = 1) -> Optional[Any]:
         'region': 'us-east-1',
         'version': '2017-09-30'}}
     """
-    for provider in CLOUD_METADATA_MAPPING.keys():
-        try:
-            params = CLOUD_METADATA_MAPPING[provider]
-            response = requests.get(
-                params["url"], headers=params["headers"], timeout=timeout
-            )
-            response.raise_for_status()
-            response_data = response.json()
+    providers = list(CLOUD_METADATA_MAPPING.keys())
 
-            postprocess_function = params.get("postprocess_function")
-            if postprocess_function is not None:
-                response_data = postprocess_function(response_data)
-
-            return {"provider": provider, "metadata": response_data}
-        except requests.exceptions.RequestException:
-            logger.debug("Not running on %s", provider)
+    # All providers answer on the same link-local address, so probing them
+    # sequentially costs one timeout each on a machine that is not on a cloud.
+    with ThreadPoolExecutor(max_workers=len(providers)) as executor:
+        futures = [executor.submit(_probe_provider, p, timeout) for p in providers]
+        # Resolve in mapping order, not completion order, so detection stays
+        # deterministic if more than one provider answers.
+        for provider, future in zip(providers, futures):
+            response_data = future.result()
+            if response_data is not None:
+                return {"provider": provider, "metadata": response_data}
 
     return None
+
+
+def _probe_provider(provider: str, timeout: int) -> Optional[Dict[str, Any]]:
+    params = CLOUD_METADATA_MAPPING[provider]
+    try:
+        response = requests.get(
+            params["url"], headers=params["headers"], timeout=timeout
+        )
+        response.raise_for_status()
+        response_data = response.json()
+    except requests.exceptions.RequestException:
+        logger.debug("Not running on %s", provider)
+        return None
+
+    postprocess_function = params.get("postprocess_function")
+    if postprocess_function is not None:
+        response_data = postprocess_function(response_data)
+
+    return response_data
