@@ -30,7 +30,10 @@ class Lock:
             self._atexit_hook
         )  # Ensure release() is called on unexpected exit of the user's python code
         # If there is more than one thread add a lock
-        self._thread_lock = threading.Lock()
+        # Reentrant: a signal delivered while this thread is inside acquire() or
+        # release() runs _handle_exit -> release() on that same thread, which a
+        # plain Lock would deadlock on.
+        self._thread_lock = threading.RLock()
         # Previous signal handlers, restored on release() so we do not take
         # permanent ownership of the host application's signal disposition.
         self._previous_handlers = {}

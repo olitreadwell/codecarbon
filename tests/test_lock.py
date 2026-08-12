@@ -156,6 +156,26 @@ class TestLockSignalHandlers(unittest.TestCase):
         mock_kill.assert_not_called()
         self.assertIs(signal.getsignal(signal.SIGTERM), signal.SIG_IGN)
 
+    @patch("codecarbon.lock.os.remove")
+    def test_release_from_within_the_critical_section_does_not_deadlock(
+        self, mock_remove
+    ):
+        """A signal handler fires on the thread that may already hold the lock."""
+        done = threading.Event()
+
+        def hold_then_release():
+            # Built off the main thread : no signal handlers to restore, so this
+            # exercises the thread lock only (signal.signal is main-thread only).
+            lock = Lock()
+            lock._has_created_lock = True
+            with lock._thread_lock:
+                lock.release()
+            done.set()
+
+        worker = threading.Thread(target=hold_then_release, daemon=True)
+        worker.start()
+        assert done.wait(timeout=5), "release() deadlocked on its own thread lock"
+
 
 if __name__ == "__main__":
     unittest.main()
