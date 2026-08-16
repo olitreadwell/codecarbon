@@ -232,6 +232,36 @@ class TestApi(unittest.TestCase):
             )
             self.assertEqual(m.last_request.json()["duration"], 0.0042)
 
+    def test_add_emission_skips_zero_duration(self):
+        """A zero-length flush would be a 422: the server requires duration > 0."""
+        with requests_mock.Mocker() as m:
+            m.post("http://test.com/emissions", json={"id": "em-1"}, status_code=201)
+            api = ApiClient(
+                endpoint_url="http://test.com",
+                experiment_id="exp-1",
+                conf=conf,
+                create_run_automatically=False,
+            )
+            api.run_id = "run-1"
+
+            self.assertFalse(
+                api.add_emission(
+                    {
+                        "duration": 0.0,
+                        "emissions": 0.0,
+                        "emissions_rate": 0.0,
+                        "cpu_power": 1.0,
+                        "gpu_power": 0.0,
+                        "ram_power": 0.5,
+                        "cpu_energy": 0.0,
+                        "gpu_energy": 0.0,
+                        "ram_energy": 0.0,
+                        "energy_consumed": 0.0,
+                    }
+                )
+            )
+            self.assertFalse(m.called)
+
     def test_add_emission_raises_on_unsuccessful_post(self):
         with requests_mock.Mocker() as m:
             m.post("http://test.com/emissions", text="bad", status_code=500)

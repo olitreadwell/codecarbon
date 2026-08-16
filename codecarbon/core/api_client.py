@@ -184,6 +184,13 @@ class ApiClient:  # (AsyncClient)
                     "ApiClient.add_emission still no run_id, aborting for this time !"
                 )
             return False
+        if carbon_emission["duration"] <= 0:
+            # The server declares duration as gt=0, so a zero-length flush would
+            # come back as a 422. There is nothing to measure in it anyway.
+            logger.warning(
+                "ApiClient : emissions not sent because the duration is not positive."
+            )
+            return False
         emission = EmissionCreate(
             timestamp=get_datetime_with_timezone(),
             run_id=self.run_id,
