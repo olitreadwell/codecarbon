@@ -37,3 +37,17 @@ finally:
 
 print(f"Emissions: {emissions} kg")
 print(f"SCI report written to ./sci_report_{tracker.run_id}.json")
+
+# The declarations can also live in a JSON context file:
+#
+#     {
+#       "functionalUnit": {"name": "inference request", "count": 10000},
+#       "embodied": {"gCO2e": 42.5, "source": "manufacturer LCA, 4y amortization"},
+#       "reporter": {"organization": "Acme", "contact": "green@acme.example"},
+#       "boundary": "Application only; excludes client devices and network."
+#     }
+#
+# Load it yourself with `SCIOutput.from_file("sci_context.json")`, or let the
+# tracker do it with `output_methods = csv,sci` and `sci_context_file` in
+# `.codecarbon.config`. That configuration-only path cannot call
+# `set_functional_unit_count()`, so the count must be in the file.

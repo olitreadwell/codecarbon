@@ -220,52 +220,19 @@ The [Software Carbon Intensity](https://sci.greensoftware.foundation/) specifica
 SCI = (E * I + M) / R
 ```
 
-CodeCarbon measures `E` (energy consumed, kWh) and applies `I` (carbon intensity, gCO2eq/kWh). The two remaining terms are declarations that only you can make:
+CodeCarbon measures `E` (energy consumed, kWh) and applies `I` (carbon intensity, gCO2eq/kWh). `R` and `M` are declarations:
 
-- `R`, the functional unit — one request, one training run, 1k tokens. There is no sensible default, so if you do not declare one the report is still written, with `sci: null` and a `status` field saying why.
-- `M`, the embodied emissions attributable to the run. CodeCarbon has no hardware manufacturing data and will not invent any; when you do not declare a figure the report says `"M_source": "not declared"` so a reader can see the report is a partial one.
+- `R`, the functional unit: one request, one training run, 1k tokens. There is no default, so if you do not declare one the report is still written, with `sci: null` and a `status` field saying why.
+- `M`, the embodied emissions attributable to the run. When you do not declare a figure the report says `"M_source": "not declared"`, so a reader can see the report is a partial one.
 
 ### How to use it
 
-```python-skip
-from codecarbon import EmissionsTracker
-from codecarbon.output_methods.sci import EmbodiedDeclaration, FunctionalUnit, SCIOutput
-
-sci = SCIOutput(
-    functional_unit=FunctionalUnit(name="inference request", count=10_000),
-    embodied=EmbodiedDeclaration(gCO2e=42.5, source="vendor LCA, 4y amortization"),
-    output_dir="reports",
-)
-tracker = EmissionsTracker(output_handlers=[sci])
-```
-
-When the count is only known at the end of the run, declare it before stopping the tracker:
-
-```python-skip
-sci.set_functional_unit_count(len(results))
-```
-
-The declarations can also live in a JSON context file, which is what the `sci` output method reads when you enable it through configuration:
-
-```json
-{
-  "functionalUnit": {"name": "inference request", "count": 10000},
-  "embodied": {"gCO2e": 42.5, "source": "manufacturer LCA, 4y amortization"},
-  "reporter": {"organization": "Acme", "contact": "green@acme.example"},
-  "boundary": "Application only; excludes client devices and network."
-}
-```
+Enable the output method and point it at a JSON context file holding the declarations:
 
 ```ini
 [codecarbon]
 output_methods = csv,sci
 sci_context_file = ./sci_context.json
-```
-
-```python-skip
-from codecarbon.output_methods.sci import SCIOutput
-
-sci = SCIOutput.from_file("sci_context.json")
 ```
 
 !!! warning "The configuration-only path needs a count in the context file"
@@ -301,4 +268,4 @@ Sample output:
 }
 ```
 
-See [examples/sci_output.py](https://github.com/mlco2/codecarbon/blob/master/examples/sci_output.py) for a runnable example.
+See [examples/sci_output.py](https://github.com/mlco2/codecarbon/blob/master/examples/sci_output.py) for a runnable example, including the context file format and how to declare the functional unit count from Python.
