@@ -194,18 +194,6 @@ to `false` to skip it entirely:
 cloud_detection = false
 ```
 
-Or in code:
-
-``` python
-EmissionsTracker(cloud_detection=False)
-```
-
-Or as an environment variable:
-
-``` shell
-export CODECARBON_CLOUD_DETECTION=false
-```
-
 With detection disabled, CodeCarbon reports no cloud provider or region and uses
 the usual geolocation path to pick a carbon intensity. `OfflineEmissionsTracker`
 never probes the metadata service, so the option has no effect there.
