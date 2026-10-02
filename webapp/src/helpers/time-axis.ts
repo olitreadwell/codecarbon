@@ -13,7 +13,7 @@ export function pickTimeFormat(spanMs: number): string {
     if (spanMs < 2 * minute) return "HH:mm:ss";
     if (spanMs < day) return "HH:mm";
     if (spanMs < 7 * day) return "MMM d, HH:mm";
-    if (spanMs < 365 * day) return "MMM d";
+    if (spanMs < 365 * day) return "MMM d, HH:mm";
     return "MMM yyyy";
 }
 
