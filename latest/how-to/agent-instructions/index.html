@@ -2820,6 +2820,9 @@
 <li>Modern React web application</li>
 <li>Connects to the API backend</li>
 <li>Run with: <code>cd webapp &amp;&amp; pnpm dev</code></li>
+<li><strong>Before editing anything under <code>webapp/</code>, read <code>webapp/AGENTS.md</code> first</strong> —
+     it is binding for all webapp work (propose before editing, never commit).
+     Claude Code loads <code>webapp/CLAUDE.md</code>, which only imports <code>webapp/AGENTS.md</code>.</li>
 </ol>
 <h3 id="key-directories">Key Directories<a class="headerlink" href="#key-directories" title="Permanent link">&para;</a></h3>
 <ul>
@@ -2833,7 +2836,7 @@
 <ul>
 <li>Python 3.7+ (preferably 3.11+)</li>
 <li>uv (Python project manager): <code>curl -LsSf https://astral.sh/uv/install.sh | sh</code></li>
-<li>Node.js &amp; pnpm (for webapp): <code>npm install -g pnpm</code> or <code>curl -fsSL https://get.pnpm.io/install.sh | sh -</code></li>
+<li>Node.js 24+ and pnpm (for webapp): <code>corepack enable</code> installs the pinned pnpm</li>
 <li>Docker (for API development)</li>
 </ul>
 <h3 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h3>
