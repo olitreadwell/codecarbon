@@ -26,6 +26,32 @@ DEFAULT_ORGANIzATION_ID = "e60afa92-17b7-4720-91a0-1ae91e409ba1"
 
 codecarbon = typer.Typer(no_args_is_help=True)
 
+# save_to_* configuration key -> (output method, default), as the tracker reads them
+_SAVE_TO_KEYS = {
+    "save_to_file": ("csv", True),
+    "save_to_api": ("api", False),
+    "save_to_logger": ("logger", False),
+    "save_to_prometheus": ("prometheus", False),
+    "save_to_logfire": ("logfire", False),
+}
+
+
+def _configured_output_methods(conf: dict) -> list:
+    """Output methods resolved from configuration alone, like the tracker does."""
+    from codecarbon.output_methods.base_output import OutputMethod
+
+    if conf.get("output_methods"):
+        return [
+            OutputMethod(method.strip())
+            for method in conf["output_methods"].split(",")
+            if method.strip()
+        ]
+    return [
+        OutputMethod(method)
+        for key, (method, default) in _SAVE_TO_KEYS.items()
+        if str(conf.get(key, default)).lower() == "true"
+    ]
+
 
 def main():
     """
@@ -33,6 +59,12 @@ def main():
     This function catches any exceptions raised during the execution of the CLI commands
     and prints an error message in red using Rich's print function.
     """
+    # Consoles with a legacy encoding (e.g. cp1252 on Windows) cannot encode
+    # the emojis we print, so replace them instead of crashing.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(errors="replace")
     try:
         codecarbon()
     except Exception as e:
@@ -358,6 +390,34 @@ def config():
     )
 
 
+def _cli_provided(ctx, name: str) -> bool:
+    """
+    Whether the option `name` was typed on the command line (or set through its
+    environment variable) rather than left at its Typer default.
+
+    Options left at their default must not be forwarded to the tracker: doing so
+    would silently override the values coming from `.codecarbon.config` and the
+    `CODECARBON_*` environment variables, which the tracker reads itself.
+    """
+    get_source = getattr(ctx, "get_parameter_source", None)
+    if get_source is None:
+        # `monitor` called directly from Python, not through Click: every value
+        # given is explicit.
+        return True
+    source = get_source(name)
+    return source is None or source.name in ("COMMANDLINE", "ENVIRONMENT")
+
+
+def _external_config() -> dict:
+    """The configuration files and CODECARBON_* variables, as a plain dict."""
+    from codecarbon.core.config import get_hierarchical_config
+
+    try:
+        return dict(get_hierarchical_config())
+    except Exception:
+        return {}
+
+
 @codecarbon.command(
     "monitor",
     short_help="Monitor your machine's carbon emissions.",
@@ -365,6 +425,10 @@ def config():
 )
 def monitor(
     ctx: typer.Context,
+    project_name: Annotated[
+        str,
+        typer.Option(help="Project name for the current experiment."),
+    ] = None,
     measure_power_secs: Annotated[
         int,
         typer.Option(help="Interval between two measures."),
@@ -391,17 +455,37 @@ def monitor(
         typer.Option(help="Log level (critical, error, warning, info, debug)"),
     ] = "error",
 ):
-    """Monitor your machine's carbon emissions."""
+    """Monitor your machine's carbon emissions.
 
-    # Shared tracker args so monitor and run_and_monitor behave the same
+    To track a single command instead, pass it after a -- separator:
+    codecarbon monitor -- python train.py
+    Emissions are appended to the same emissions.csv report. See
+    https://docs.codecarbon.io/latest/tutorials/cli/#track-any-command
+    """
+
+    external_conf = _external_config()
+
+    # Shared tracker args so monitor and run_and_monitor behave the same.
+    # Only the options actually given are forwarded: the others are left to the
+    # tracker, which resolves them from the configuration file and environment.
+    cli_defaults = (
+        ("project_name", project_name),
+        ("measure_power_secs", measure_power_secs),
+        ("api_call_interval", api_call_interval),
+        ("log_level", log_level),
+    )
     tracker_args = {
-        "measure_power_secs": measure_power_secs,
-        "api_call_interval": api_call_interval,
-        "log_level": log_level,
+        name: value for name, value in cli_defaults if _cli_provided(ctx, name)
     }
+    for name, value in cli_defaults:
+        if name not in tracker_args and name not in external_conf:
+            # Nothing configures it: keep the defaults advertised by `--help`
+            # (and an unattended monitor quiet) instead of the tracker's own.
+            tracker_args[name] = value
+
     # Set up the tracker arguments based on mode (offline vs online) and validate required args for each mode
     if offline:
-        if not country_iso_code:
+        if not country_iso_code and not external_conf.get("country_iso_code"):
             print(
                 "ERROR: Country ISO code is required for offline mode. Add it to your configuration or provide it via the command line: `--country-iso-code FRA`",
                 file=sys.stderr,
@@ -410,8 +494,8 @@ def monitor(
 
         tracker_args = {
             **tracker_args,
-            "country_iso_code": country_iso_code,
-            "region": region,
+            **({"country_iso_code": country_iso_code} if country_iso_code else {}),
+            **({"region": region} if region else {}),
         }
     else:
         experiment_id = get_existing_exp_id()
@@ -422,7 +506,18 @@ def monitor(
             )
             raise typer.Exit(1)
 
-        tracker_args = {**tracker_args, "save_to_api": api}
+        # output_methods replaces the configured outputs, so start from them and
+        # only add or remove the API, as save_to_api=api used to.
+        from codecarbon.output_methods.base_output import OutputMethod
+
+        output_methods = [
+            m
+            for m in _configured_output_methods(external_conf)
+            if m != OutputMethod.API
+        ]
+        if api:
+            output_methods.append(OutputMethod.API)
+        tracker_args = {**tracker_args, "output_methods": output_methods}
 
     from codecarbon.emissions_tracker import EmissionsTracker, OfflineEmissionsTracker
 
@@ -473,7 +568,7 @@ def detect():
     from codecarbon.emissions_tracker import EmissionsTracker
 
     print("Detecting hardware...")
-    tracker = EmissionsTracker(save_to_file=False)
+    tracker = EmissionsTracker(output_methods=[])
     hardware_info = tracker.get_detected_hardware()
 
     print("\nDetected Hardware and System Information:")
@@ -500,6 +595,10 @@ def questionary_prompt(prompt, list_options, default):
         list_options,
         default,
     ).ask()
+    if value is None:
+        # questionary returns None when the user cancels (Ctrl+C); stop the
+        # wizard cleanly instead of carrying on with no selection.
+        raise typer.Abort()
     return value
 
 

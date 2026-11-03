@@ -1,9 +1,11 @@
+import json
 import os
 import shutil
 import sys
 import tempfile
 import time
 import unittest
+import warnings
 from pathlib import Path
 from unittest import mock
 
@@ -11,11 +13,14 @@ import pandas as pd
 import requests
 import responses
 
+from codecarbon.core import electricitymaps_api
 from codecarbon.core.units import Energy, Power
 from codecarbon.emissions_tracker import (
     EmissionsTracker,
     OfflineEmissionsTracker,
+    _caller_stacklevel,
     track_emissions,
+    track_task_emissions,
 )
 from codecarbon.external.geography import CloudMetadata
 from codecarbon.output import BoAmpsOutput, CodeCarbonAPIOutput, OutputMethod
@@ -151,6 +156,35 @@ class TestCarbonTracker(unittest.TestCase):
         tracker._monitor_power()
 
         self.assertEqual([10, 25], tracker._gpu_utilization_history)
+
+    def test_monitor_power_waits_while_utilization_history_is_read(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        """The monitor thread must not append while the measurement thread
+        averages or clears the utilization history."""
+        import threading
+
+        tracker = EmissionsTracker(measure_power_secs=1, save_to_file=False)
+        tracker._hardware = []
+        monitor = threading.Thread(target=tracker._monitor_power)
+
+        with tracker._utilization_history_lock:
+            monitor.start()
+            monitor.join(0.2)
+            self.assertTrue(monitor.is_alive())
+            self.assertEqual([], tracker._cpu_utilization_history)
+        monitor.join(5)
+
+        self.assertFalse(monitor.is_alive())
+        self.assertEqual(1, len(tracker._cpu_utilization_history))
+        self.assertEqual(1, len(tracker._ram_used_history))
 
     def test_monitor_power_skips_gpu_when_index_is_none(
         self,
@@ -356,6 +390,154 @@ class TestCarbonTracker(unittest.TestCase):
             )
         )
 
+    def test_output_methods_boamps_uses_metadata_boamps_section(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        tracker = EmissionsTracker(
+            output_dir=self.temp_path,
+            output_handlers=[],
+            output_methods=[OutputMethod.BOAMPS],
+            metadata={
+                "boamps": {
+                    "task": {
+                        "taskStage": "training",
+                        "taskFamily": "classification",
+                        "algorithms": [{"algorithmType": "random_forest"}],
+                        "dataset": [
+                            {
+                                "dataUsage": "input",
+                                "dataType": "table",
+                                "dataQuantity": 100,
+                            }
+                        ],
+                    },
+                    "quality": "high",
+                },
+                "other": {"owner": "ml-team"},
+            },
+        )
+
+        boamps_handler = next(
+            handler
+            for handler in tracker._output_handlers
+            if isinstance(handler, BoAmpsOutput)
+        )
+        self.assertEqual(boamps_handler._quality, "high")
+        self.assertIsNotNone(boamps_handler._task)
+        self.assertEqual(boamps_handler._task.task_stage, "training")
+        self.assertEqual(boamps_handler._task.task_family, "classification")
+        self.assertEqual(
+            boamps_handler._task.algorithms[0].algorithm_type,
+            "random_forest",
+        )
+
+    def test_output_methods_boamps_metadata_back_compat_without_boamps_key(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        tracker = EmissionsTracker(
+            output_dir=self.temp_path,
+            output_handlers=[],
+            output_methods=[OutputMethod.BOAMPS],
+            metadata={
+                "task": {
+                    "taskStage": "inference",
+                    "taskFamily": "chatbot",
+                },
+                "quality": "medium",
+            },
+        )
+
+        boamps_handler = next(
+            handler
+            for handler in tracker._output_handlers
+            if isinstance(handler, BoAmpsOutput)
+        )
+        self.assertEqual(boamps_handler._quality, "medium")
+        self.assertEqual(boamps_handler._task.task_stage, "inference")
+        self.assertEqual(boamps_handler._task.task_family, "chatbot")
+
+    def test_output_methods_boamps_reads_metadata_from_json_file(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        metadata_path = self.temp_path / "metadata.json"
+        metadata_path.write_text(
+            json.dumps(
+                {
+                    "boamps": {
+                        "task": {
+                            "taskStage": "training",
+                            "taskFamily": "classification",
+                        },
+                        "quality": "high",
+                    }
+                }
+            )
+        )
+
+        tracker = EmissionsTracker(
+            output_dir=self.temp_path,
+            output_handlers=[],
+            output_methods=[OutputMethod.BOAMPS],
+            metadata=str(metadata_path),
+        )
+
+        boamps_handler = next(
+            handler
+            for handler in tracker._output_handlers
+            if isinstance(handler, BoAmpsOutput)
+        )
+        self.assertEqual(boamps_handler._quality, "high")
+        self.assertEqual(boamps_handler._task.task_stage, "training")
+
+    def test_output_methods_boamps_falls_back_on_invalid_metadata_file(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        metadata_path = self.temp_path / "bad_metadata.json"
+        metadata_path.write_text("{ invalid json")
+
+        tracker = EmissionsTracker(
+            output_dir=self.temp_path,
+            output_handlers=[],
+            output_methods=[OutputMethod.BOAMPS],
+            metadata=str(metadata_path),
+        )
+
+        boamps_handler = next(
+            handler
+            for handler in tracker._output_handlers
+            if isinstance(handler, BoAmpsOutput)
+        )
+        self.assertIsNone(boamps_handler._task)
+        self.assertIsNone(boamps_handler._quality)
+
     def test_default_output_methods_is_csv(
         self,
         mock_cli_setup,
@@ -383,7 +565,7 @@ class TestCarbonTracker(unittest.TestCase):
         mocked_is_gpu_details_available,
         mocked_is_nvidia_system,
     ):
-        with self.assertWarns(DeprecationWarning):
+        with self.assertWarns(FutureWarning):
             tracker = EmissionsTracker(
                 output_dir=self.temp_path,
                 output_handlers=[],
@@ -408,7 +590,7 @@ class TestCarbonTracker(unittest.TestCase):
         mocked_is_gpu_details_available,
         mocked_is_nvidia_system,
     ):
-        with self.assertWarns(DeprecationWarning):
+        with self.assertWarns(FutureWarning):
             tracker = EmissionsTracker(
                 output_dir=self.temp_path,
                 output_handlers=[],
@@ -609,6 +791,38 @@ class TestCarbonTracker(unittest.TestCase):
         dummy_train_model()
         self.verify_output_file(self.emissions_file_path, 2)
 
+    def test_track_task_emissions_decorator(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        tracker = OfflineEmissionsTracker(
+            country_iso_code="USA",
+            measure_power_secs=1,
+            output_dir=self.temp_path,
+            experiment_id="test",
+        )
+        tracker.start()
+
+        @track_task_emissions(tracker=tracker, task_name="training")
+        def dummy_train_model():
+            heavy_computation(run_time_secs=1)
+            return 42
+
+        # The decorator is transparent: same name, same return value.
+        self.assertEqual("dummy_train_model", dummy_train_model.__name__)
+        self.assertEqual(42, dummy_train_model())
+
+        # ...and the task has been measured on the tracker we passed in.
+        self.assertIn("training", tracker._tasks)
+        self.assertGreater(tracker._tasks["training"].emissions_data.duration, 0)
+        tracker.stop()
+
     def test_offline_tracker_country_name(
         self,
         mock_cli_setup,
@@ -764,6 +978,78 @@ class TestCarbonTracker(unittest.TestCase):
         self.assertTrue(
             any("Tracker not initialized" in message for message in logs.output)
         )
+
+    def test_stop_task_resumes_scheduler_only_if_start_task_paused_it(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        # Pure start_task/stop_task usage: no periodic scheduler must be left running.
+        tracker = EmissionsTracker(save_to_file=False)
+        tracker.start_task("task-only")
+        tracker.stop_task()
+        self.assertTrue(tracker._scheduler._stopped)
+        tracker.stop()
+
+        # start() then start_task/stop_task: the paused scheduler must be resumed.
+        tracker = EmissionsTracker(save_to_file=False)
+        tracker.start()
+        tracker.start_task("task-in-run")
+        self.assertTrue(tracker._scheduler._stopped)
+        tracker.stop_task()
+        self.assertFalse(tracker._scheduler._stopped)
+        tracker.stop()
+
+        # A second start_task on an already measuring tracker must not clear the
+        # "paused by task" flag, otherwise the scheduler is never resumed.
+        tracker = EmissionsTracker(save_to_file=False)
+        tracker.start()
+        tracker.start_task("first-task")
+        tracker.start_task("ignored-second-task")
+        self.assertTrue(tracker._scheduler._stopped)
+        tracker.stop_task()
+        self.assertFalse(tracker._scheduler._stopped)
+        tracker.stop()
+
+        # An unknown task name must not leave the scheduler paused either.
+        tracker = EmissionsTracker(save_to_file=False)
+        tracker.start()
+        tracker.start_task("known-task")
+        self.assertIsNone(tracker.stop_task("unknown-task"))
+        self.assertFalse(tracker._scheduler._stopped)
+        tracker.stop()
+
+    def test_power_monitor_keeps_running_around_tasks(
+        self,
+        mock_cli_setup,
+        mock_log_values,
+        mocked_get_gpu_details,
+        mocked_env_cloud_details,
+        mocked_get_gpu_utilization_list,
+        mocked_is_gpu_details_available,
+        mocked_is_nvidia_system,
+    ):
+        # The 1s monitor samples power for hardware without an energy counter:
+        # it must run even without output handlers, and survive a task.
+        tracker = EmissionsTracker(save_to_file=False)
+        tracker.start()
+        self.assertFalse(tracker._scheduler_monitor_power._stopped)
+        tracker.start_task("task-in-run")
+        tracker.stop_task()
+        self.assertFalse(tracker._scheduler_monitor_power._stopped)
+        tracker.stop()
+
+        # Pure start_task/stop_task usage leaves nothing running.
+        tracker = EmissionsTracker(save_to_file=False)
+        tracker.start_task("task-only")
+        tracker.stop_task()
+        self.assertTrue(tracker._scheduler_monitor_power._stopped)
+        tracker.stop()
 
     @mock.patch("codecarbon.external.ram.RAM.measure_power_and_energy")
     @mock.patch("codecarbon.external.hardware.CPU.measure_power_and_energy")
@@ -1038,6 +1324,8 @@ class TestCarbonTracker(unittest.TestCase):
         mocked_is_nvidia_system,
     ):
         # Setup mocks
+        electricitymaps_api.reset_cache()
+        self.addCleanup(electricitymaps_api.reset_cache)
         mock_geo.return_value = mock.MagicMock(
             latitude=1.0,
             longitude=1.0,
@@ -1092,7 +1380,9 @@ class TestCarbonTracker(unittest.TestCase):
         data1 = tracker._prepare_emissions_data()
         self.assertAlmostEqual(data1.emissions, 0.1)
 
-        # Step 2
+        # Step 2: drop the cache so this tick sees a fresh intensity, as it
+        # would once the TTL expires. This test is about cumulating deltas.
+        electricitymaps_api.reset_cache()
         tracker._measure_power_and_energy()
         # total_energy = 2.0, delta_energy = 1.0, intensity = 200 => delta_emissions = 0.2 kg
         # total_emissions = 0.3 kg
@@ -1100,6 +1390,7 @@ class TestCarbonTracker(unittest.TestCase):
         self.assertAlmostEqual(data2.emissions, 0.3)
 
         # Step 3
+        electricitymaps_api.reset_cache()
         tracker._measure_power_and_energy()
         # total_energy = 3.0, delta_energy = 1.0, intensity = 300 => delta_emissions = 0.3 kg
         # total_emissions = 0.6 kg
@@ -1108,3 +1399,28 @@ class TestCarbonTracker(unittest.TestCase):
 
         # Verification: If it wasn't cumulative, it would be 3.0 kWh * 300 g/kWh = 0.9 kg
         self.assertLess(data3.emissions, 0.8)
+
+
+def test_deprecation_warning_survives_the_default_filter():
+    """The save_to_* deprecation is aimed at end users, so it must not be a
+    DeprecationWarning: the default filter would silently drop it."""
+    for tracker_cls, extra in (
+        (EmissionsTracker, {}),
+        (OfflineEmissionsTracker, {"country_iso_code": "FRA"}),
+    ):
+        with warnings.catch_warnings(record=True) as recorded:
+            warnings.simplefilter("default")
+            # What Python installs by default, and what hid this warning before.
+            warnings.simplefilter("ignore", DeprecationWarning)
+            tracker_cls(save_to_file=False, **extra)
+
+        future = [w for w in recorded if issubclass(w.category, FutureWarning)]
+        assert future, f"no FutureWarning raised by {tracker_cls.__name__}"
+        # THEN the warning points at the caller, not at codecarbon internals.
+        assert future[0].filename == __file__
+
+
+def test_caller_stacklevel_falls_back_when_no_frame_is_outside_codecarbon():
+    # Every frame looks like codecarbon code, so no caller can be found.
+    with mock.patch("codecarbon.emissions_tracker._PACKAGE_DIR", ""):
+        assert _caller_stacklevel() == 2

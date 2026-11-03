@@ -76,6 +76,19 @@ Yields attributes:
 }
 ```
 
+!!! note "Where does a value come from?"
+
+    CodeCarbon logs one line listing every configuration key read from the files
+    and the environment, with the layer it came from, so you can trace a
+    surprising value back to its source:
+
+    ```
+    [codecarbon INFO @ 09:30:00] Codecarbon configuration: experiment_id from CODECARBON_EXPERIMENT_ID, measure_power_secs from /home/victor/.codecarbon.config
+    ```
+
+    Only the key names and their source are logged, never the values, as this
+    configuration holds secrets such as `api_key`.
+
 !!! note "Note"
 
     If you're wondering about the configuration files' syntax, be aware
@@ -100,6 +113,18 @@ carbon intensity of your grid. The query runs at the end of each tracking run,
 and also periodically during long runs (every
 `api_call_interval × measure_power_secs` seconds; default: every ~2 minutes).
 
+!!! warning "Carbon intensity is cached for 60 seconds"
+
+    A fetched carbon intensity is reused for 60 seconds before the API is
+    queried again, so measurements taken within that window share the same
+    intensity value. With default settings the periodic query runs every ~2
+    minutes, so the cache mainly deduplicates closely spaced lookups (for
+    example the final query in `stop()`, or several trackers in one process).
+    After a failure (invalid token, network down), requests are skipped for a
+    cooldown that starts at 30 seconds and doubles on each consecutive failure,
+    up to 1 hour, per location and token; it resets after a successful request.
+    Meanwhile CodeCarbon falls back to its own country data.
+
 The Electricity Maps API offers a free tier. You can sign up and get a token at
 [electricitymaps.com](https://app.electricitymaps.com/sign-up).
 
@@ -120,7 +145,8 @@ EmissionsTracker(electricitymaps_api_token="your-token-here")
 
     The old parameter name `co2_signal_api_token` still works for backward
     compatibility but is deprecated and will be removed in a future version.
-    Use `electricitymaps_api_token` instead.
+    Use `electricitymaps_api_token` instead. See the
+    [deprecations list](https://docs.codecarbon.io/latest/reference/deprecations/).
 
 ## Tracking Mode
 
