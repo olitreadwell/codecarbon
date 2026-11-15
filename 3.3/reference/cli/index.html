@@ -6,12 +6,17 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Measure and reduce carbon emissions from computing - Official Documentation">
+        <meta name="description" content="CodeCarbon provides a command-line interface for tracking emissions without modifying code.">
       
       
       
-        <link rel="canonical" href="https://docs.codecarbon.io/reference/cli/">
+        <link rel="canonical" href="https://docs.codecarbon.io/latest/reference/cli/">
       
+      
+        <link rel="describedby" href="../../llms.txt">
+        
+          <link rel="alternate" type="text/markdown" href="./index.md">
+        
       
       
         <link rel="prev" href="../deprecations/">
@@ -24,7 +29,7 @@
       
       
       <link rel="icon" href="../../images/favicon.ico">
-      <meta name="generator" content="zensical-0.0.71">
+      <meta name="generator" content="zensical-0.1.1">
     
     
       
@@ -35,7 +40,7 @@
       
         
       
-      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e442bf79.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.ebb7f775.min.css">
       
         
           
@@ -53,8 +58,8 @@
       
         
         
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        
+        <link href="../../assets/external/fonts.googleapis.com/css.c788a136.css" rel="stylesheet">
         <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
       
     
@@ -73,6 +78,7 @@
   
   
   
+    
   
   
   
@@ -80,16 +86,16 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="CodeCarbon">
   <meta property="og:title" content="CLI Reference - CodeCarbon">
-  <meta property="og:description" content="Measure and reduce carbon emissions from computing - Official Documentation">
+  <meta property="og:description" content="CodeCarbon provides a command-line interface for tracking emissions without modifying code.">
   <meta property="og:image" content="https://docs.codecarbon.io/latest/images/og-card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Measure and reduce carbon emissions from computing - Official Documentation">
+  <meta property="og:image:alt" content="CodeCarbon provides a command-line interface for tracking emissions without modifying code.">
   <meta property="og:url" content="https://docs.codecarbon.io/latest/reference/cli/">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="CLI Reference - CodeCarbon">
-  <meta name="twitter:description" content="Measure and reduce carbon emissions from computing - Official Documentation">
+  <meta name="twitter:description" content="CodeCarbon provides a command-line interface for tracking emissions without modifying code.">
   <meta name="twitter:image" content="https://docs.codecarbon.io/latest/images/og-card.png">
 
   </head>
@@ -133,9 +139,10 @@
   <img src="../../images/codecarbon-logo.svg" alt="CodeCarbon">
 
     </a>
-    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+    <label class="md-header__button md-icon" for="__drawer">
       
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+      <span class="md-visually-hidden">Navigation</span>
     </label>
     <div class="md-header__title" data-md-component="header-title">
       <div class="md-header__ellipsis">
@@ -187,9 +194,10 @@
     
       
       
-        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+        <label class="md-header__button md-icon" for="__search">
           
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+          <span class="md-visually-hidden">Search</span>
         </label>
         <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
   <button type="button" class="md-search__button">
@@ -2139,6 +2147,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#global-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Global options
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#commands" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2199,6 +2218,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>codecarbon detect</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#codecarbon-get-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>codecarbon get-token</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#codecarbon-test-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>codecarbon test-api</code>
       </span>
     </span>
   </a>
@@ -2320,6 +2361,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#global-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Global options
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#commands" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2380,6 +2432,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>codecarbon detect</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#codecarbon-get-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>codecarbon get-token</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#codecarbon-test-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>codecarbon test-api</code>
       </span>
     </span>
   </a>
@@ -2459,6 +2533,11 @@
                 <a id="__skip" tabindex="-1"></a>
                 
                   
+  <button type="button" title="Copy as Markdown" aria-label="Copy as Markdown" class="md-content__button md-icon" data-md-copy-url="./index.md">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 21H8V7h11m0-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2m-3-4H4a2 2 0 0 0-2 2v14h2V3h12z"/></svg>
+  </button>
+
 
   
     <a href="https://github.com/mlco2/codecarbon/edit/master/docs/reference/cli.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
@@ -2479,6 +2558,21 @@
 
 <h1 id="cli-reference">CLI Reference<a class="headerlink" href="#cli-reference" title="Permanent link">&para;</a></h1>
 <p>CodeCarbon provides a command-line interface for tracking emissions without modifying code.</p>
+<h2 id="global-options">Global options<a class="headerlink" href="#global-options" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--version</code>, <code>-v</code></td>
+<td>Show the installed CodeCarbon version and exit</td>
+</tr>
+</tbody>
+</table>
 <h2 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h2>
 <h3 id="codecarbon-config"><code>codecarbon config</code><a class="headerlink" href="#codecarbon-config" title="Permanent link">&para;</a></h3>
 <p>Create or modify a <code>.codecarbon.config</code> configuration file interactively.</p>
@@ -2499,6 +2593,10 @@
 </code></pre></div></p>
 <p>Displays real-time emissions data for all processes on your machine. Press <code>Ctrl+C</code> to stop.</p>
 <p><strong>Options:</strong></p>
+<p>Each option overrides the matching key of <code>.codecarbon.config</code> or <code>CODECARBON_*</code>
+variable (see <a href="../../how-to/configuration/">Configuration</a>). An option left out keeps
+the configured value. Each flag also has a negative form, such as
+<code>--no-rapl-include-dram</code>.</p>
 <table>
 <thead>
 <tr>
@@ -2510,31 +2608,238 @@
 </thead>
 <tbody>
 <tr>
-<td><code>--no-api</code></td>
-<td>flag</td>
-<td>false</td>
-<td>Do not send data to the API (local-only measurement)</td>
+<td><code>--project-name</code></td>
+<td>string</td>
+<td>-</td>
+<td>Project name for the current experiment</td>
 </tr>
 <tr>
-<td><code>--offline</code></td>
+<td><code>--measure-power-secs</code></td>
+<td>int</td>
+<td>10</td>
+<td>Interval in seconds between two measures</td>
+</tr>
+<tr>
+<td><code>--api-call-interval</code></td>
+<td>int</td>
+<td>30</td>
+<td>Number of measures between API calls</td>
+</tr>
+<tr>
+<td><code>--api</code> / <code>--no-api</code></td>
 <td>flag</td>
-<td>false</td>
+<td><code>--api</code></td>
+<td>Add or remove the API from the output methods</td>
+</tr>
+<tr>
+<td><code>--offline</code> / <code>--no-offline</code></td>
+<td>flag</td>
+<td><code>--no-offline</code></td>
 <td>Run without internet access</td>
 </tr>
 <tr>
 <td><code>--country-iso-code</code></td>
 <td>string</td>
 <td>-</td>
-<td>ISO 3166-1 alpha-3 country code (required in offline mode)</td>
+<td>3-letter country ISO code. Required in offline mode, unless it is set in the config file</td>
+</tr>
+<tr>
+<td><code>--region</code></td>
+<td>string</td>
+<td>-</td>
+<td>Region or province, for offline mode</td>
 </tr>
 <tr>
 <td><code>--log-level</code></td>
-<td>choice</td>
-<td>ERROR</td>
-<td>Log level: DEBUG, INFO, WARNING, ERROR</td>
+<td>string</td>
+<td>error</td>
+<td>Log level: critical, error, warning, info, debug</td>
+</tr>
+<tr>
+<td><code>--experiment-id</code></td>
+<td>string</td>
+<td>-</td>
+<td>Experiment ID, satisfies the online-mode check</td>
+</tr>
+<tr>
+<td><code>--experiment-name</code></td>
+<td>string</td>
+<td>-</td>
+<td>Experiment name</td>
+</tr>
+<tr>
+<td><code>--api-endpoint</code></td>
+<td>string</td>
+<td>-</td>
+<td>CodeCarbon API endpoint</td>
+</tr>
+<tr>
+<td><code>--api-key</code></td>
+<td>string</td>
+<td>-</td>
+<td>CodeCarbon API key</td>
+</tr>
+<tr>
+<td><code>--output-methods</code></td>
+<td>string</td>
+<td>-</td>
+<td>Comma-separated output methods: <code>csv</code>, <code>api</code>, <code>logger</code>, <code>prometheus</code>, <code>logfire</code>, ...</td>
+</tr>
+<tr>
+<td><code>--output-dir</code></td>
+<td>string</td>
+<td>-</td>
+<td>Directory for output files</td>
+</tr>
+<tr>
+<td><code>--output-file</code></td>
+<td>string</td>
+<td>-</td>
+<td>Output CSV file name</td>
+</tr>
+<tr>
+<td><code>--on-csv-write</code></td>
+<td>string</td>
+<td>-</td>
+<td><code>append</code> or <code>update</code></td>
+</tr>
+<tr>
+<td><code>--live-output-file</code></td>
+<td>string</td>
+<td>-</td>
+<td>CSV file receiving every interval measurement</td>
+</tr>
+<tr>
+<td><code>--metadata</code></td>
+<td>string</td>
+<td>-</td>
+<td>JSON file of metadata added to the outputs</td>
+</tr>
+<tr>
+<td><code>--prometheus-url</code></td>
+<td>string</td>
+<td>-</td>
+<td>Prometheus push gateway URL</td>
+</tr>
+<tr>
+<td><code>--emissions-endpoint</code></td>
+<td>string</td>
+<td>-</td>
+<td>HTTP endpoint receiving the emissions</td>
+</tr>
+<tr>
+<td><code>--logger-preamble</code></td>
+<td>string</td>
+<td>-</td>
+<td>Text prefixed to the tracker log messages</td>
+</tr>
+<tr>
+<td><code>--gpu-ids</code></td>
+<td>string</td>
+<td>-</td>
+<td>Comma-separated GPU IDs to track, such as <code>0,2</code></td>
+</tr>
+<tr>
+<td><code>--tracking-mode</code></td>
+<td>string</td>
+<td>-</td>
+<td><code>machine</code> or <code>process</code> (<code>process</code> when wrapping a command)</td>
+</tr>
+<tr>
+<td><code>--force-cpu-power</code></td>
+<td>float</td>
+<td>-</td>
+<td>CPU power in watts, replaces the estimate</td>
+</tr>
+<tr>
+<td><code>--force-ram-power</code></td>
+<td>float</td>
+<td>-</td>
+<td>RAM power in watts, replaces the estimate</td>
+</tr>
+<tr>
+<td><code>--force-mode-cpu-load</code></td>
+<td>flag</td>
+<td>-</td>
+<td>Estimate CPU power from its load</td>
+</tr>
+<tr>
+<td><code>--force-mode-constant</code></td>
+<td>flag</td>
+<td>-</td>
+<td>Estimate CPU power as a constant fraction of its TDP, takes precedence over <code>--force-mode-cpu-load</code></td>
+</tr>
+<tr>
+<td><code>--pue</code></td>
+<td>float</td>
+<td>-</td>
+<td>Power Usage Effectiveness of the data center</td>
+</tr>
+<tr>
+<td><code>--wue</code></td>
+<td>float</td>
+<td>-</td>
+<td>Water Usage Effectiveness, in L/kWh</td>
+</tr>
+<tr>
+<td><code>--force-carbon-intensity-g-co2e-kwh</code></td>
+<td>float</td>
+<td>-</td>
+<td>Carbon intensity of the electricity, in gCO2e/kWh</td>
+</tr>
+<tr>
+<td><code>--electricitymaps-api-token</code></td>
+<td>string</td>
+<td>-</td>
+<td>Electricity Maps API token</td>
+</tr>
+<tr>
+<td><code>--use-national-grid-eso-api</code></td>
+<td>flag</td>
+<td>-</td>
+<td>In Great Britain, use the live National Grid ESO carbon intensity</td>
+</tr>
+<tr>
+<td><code>--rapl-include-dram</code></td>
+<td>flag</td>
+<td>-</td>
+<td>Include DRAM in the RAPL measures</td>
+</tr>
+<tr>
+<td><code>--rapl-prefer-psys</code></td>
+<td>flag</td>
+<td>-</td>
+<td>Prefer the RAPL platform (psys) domain</td>
+</tr>
+<tr>
+<td><code>--allow-multiple-runs</code></td>
+<td>flag</td>
+<td>-</td>
+<td>Allow several CodeCarbon instances at the same time</td>
+</tr>
+<tr>
+<td><code>--save-to-file</code>, <code>--save-to-logger</code>, <code>--save-to-prometheus</code>, <code>--save-to-logfire</code></td>
+<td>flag</td>
+<td>-</td>
+<td>Deprecated: use <code>--output-methods</code></td>
+</tr>
+<tr>
+<td><code>--co2-signal-api-token</code></td>
+<td>string</td>
+<td>-</td>
+<td>Deprecated: use <code>--electricitymaps-api-token</code></td>
 </tr>
 </tbody>
 </table>
+<p>In online mode, <code>--output-methods</code> replaces the configured output methods, and
+<code>--api</code> / <code>--no-api</code> then adds or removes the API.</p>
+<div class="admonition warning">
+<p class="admonition-title">Secrets on the command line</p>
+<p>Other users of the machine can read command-line arguments, and your shell
+saves them in its history. Prefer the <code>CODECARBON_API_KEY</code> and
+<code>CODECARBON_ELECTRICITYMAPS_API_TOKEN</code> environment variables, or the
+configuration file, to <code>--api-key</code> and <code>--electricitymaps-api-token</code>.</p>
+</div>
 <p><strong>Examples:</strong>
 <div class="highlight"><pre><span></span><code><span class="c1"># Monitor with API (default)</span>
 codecarbon<span class="w"> </span>monitor
@@ -2547,6 +2852,9 @@ codecarbon<span class="w"> </span>monitor<span class="w"> </span>--offline<span 
 
 <span class="c1"># Monitor with debug logging</span>
 codecarbon<span class="w"> </span>monitor<span class="w"> </span>--log-level<span class="w"> </span>DEBUG
+
+<span class="c1"># Monitor a server in a data center, writing to a CSV file and the logger</span>
+codecarbon<span class="w"> </span>monitor<span class="w"> </span>--no-api<span class="w"> </span>--pue<span class="w"> </span><span class="m">1</span>.4<span class="w"> </span>--output-methods<span class="w"> </span>csv,logger
 </code></pre></div></p>
 <h3 id="codecarbon-monitor-command"><code>codecarbon monitor -- &lt;command&gt;</code><a class="headerlink" href="#codecarbon-monitor-command" title="Permanent link">&para;</a></h3>
 <p>Track emissions for a specific command or process.</p>
@@ -2572,6 +2880,18 @@ codecarbon<span class="w"> </span>monitor<span class="w"> </span>--<span class="
 <div class="highlight"><pre><span></span><code>codecarbon<span class="w"> </span>detect
 </code></pre></div></p>
 <p>Displays detected RAM, CPU, GPU, and other hardware information that CodeCarbon uses to estimate energy consumption. Useful for verifying that CodeCarbon can see all your hardware.</p>
+<h3 id="codecarbon-get-token"><code>codecarbon get-token</code><a class="headerlink" href="#codecarbon-get-token" title="Permanent link">&para;</a></h3>
+<p>Get an API token for a project.</p>
+<p><strong>Usage:</strong>
+<div class="highlight"><pre><span></span><code>codecarbon<span class="w"> </span>get-token<span class="w"> </span>PROJECT_ID
+</code></pre></div></p>
+<p>Requests a new API token for the project <code>PROJECT_ID</code> and prints it. Add it to the <code>api_key</code> field of your configuration file. You must be logged in first (see <code>codecarbon login</code>).</p>
+<h3 id="codecarbon-test-api"><code>codecarbon test-api</code><a class="headerlink" href="#codecarbon-test-api" title="Permanent link">&para;</a></h3>
+<p>Check that your API access works.</p>
+<p><strong>Usage:</strong>
+<div class="highlight"><pre><span></span><code>codecarbon<span class="w"> </span>test-api
+</code></pre></div></p>
+<p>Makes an authenticated request to the CodeCarbon API and prints the list of your organizations.</p>
 
 
 
@@ -2580,6 +2900,9 @@ codecarbon<span class="w"> </span>monitor<span class="w"> </span>--<span class="
 
 
 
+
+  
+  
 
 
 
@@ -2729,10 +3052,10 @@ codecarbon<span class="w"> </span>monitor<span class="w"> </span>--<span class="
         
           
         
-      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.action.view","content.code.copy","content.code.select","content.tabs.link","content.tooltips","navigation.instant","navigation.instant.progress","navigation.tracking","navigation.tabs","navigation.tabs.sticky","navigation.sections","navigation.path","navigation.top","navigation.footer","search.highlight"],"redirect":"../../redirect.json","search":"../../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"default":"latest","provider":"mike"}}</script>
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.copy","content.action.edit","content.action.view","content.code.annotate","content.code.copy","content.code.select","content.footnote.tooltips","content.tabs.link","content.tooltips","navigation.instant","navigation.instant.prefetch","navigation.instant.preview","navigation.instant.progress","navigation.tracking","navigation.tabs","navigation.tabs.sticky","navigation.sections","navigation.path","navigation.top","navigation.footer","search.highlight","toc.follow"],"redirect":"../../redirect.json","search":"../../assets/javascripts/workers/search.719e0d91.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"default":"latest","provider":"mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.a2388154.min.js"></script>
+      <script src="../../assets/javascripts/bundle.3cb411a8.min.js"></script>
       
         <script src="../../javascripts/mathjax.js"></script>
       
